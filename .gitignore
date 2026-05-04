@@ -3,4 +3,4 @@ __pycache__/
 models/
 third_party/
 config.json
-data.db
+data.*

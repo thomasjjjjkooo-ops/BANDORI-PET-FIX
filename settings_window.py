@@ -215,7 +215,6 @@ class NavButton(QPushButton):
             QPushButton:checked {{
                 background: {checked_bg};
                 color: {checked_text};
-                border-left: 3px solid {checked_border};
             }}
         """)
 
@@ -279,7 +278,8 @@ class SettingsWindow(QWidget):
         super().showEvent(event)
         if not hasattr(self, '_entrance_done'):
             self._entrance_done = True
-            QTimer.singleShot(50, self._play_entrance)
+            QTimer.singleShot(80, self._play_entrance)
+            QTimer.singleShot(120, lambda: self._animate_indicator(self._current_page))
 
     def _play_entrance(self):
         effect = QGraphicsOpacityEffect(self)
@@ -406,6 +406,14 @@ class SettingsWindow(QWidget):
         """)
         self._theme_widgets.append(sidebar)
 
+        self._nav_indicator = QWidget(sidebar)
+        self._nav_indicator.setFixedSize(4, 28)
+        self._nav_indicator.setStyleSheet(f"""
+            background: #60cdff;
+            border-radius: 2px;
+        """)
+        self._nav_indicator.hide()
+
         return sidebar
 
     def _on_nav_selected(self, nav_key: str):
@@ -417,6 +425,41 @@ class SettingsWindow(QWidget):
             page.setVisible(key == nav_key)
         self._costume_page.hide()
         self._current_page = nav_key
+        self._animate_indicator(nav_key)
+
+    def _animate_indicator(self, nav_key: str):
+        btn = self._nav_buttons.get(nav_key)
+        if btn is None:
+            return
+        target_y = btn.mapTo(btn.parent(), btn.rect().topLeft()).y()
+        target_y += (btn.height() - self._nav_indicator.height()) // 2
+        target_x = 6
+        target = self._nav_indicator.geometry()
+        target.setRect(target_x, target_y, 4, 28)
+
+        if not self._nav_indicator.isVisible():
+            self._nav_indicator.move(target_x, target_y)
+            self._nav_indicator.show()
+            effect = QGraphicsOpacityEffect(self._nav_indicator)
+            effect.setOpacity(0.0)
+            self._nav_indicator.setGraphicsEffect(effect)
+            anim = QPropertyAnimation(effect, b"opacity", self._nav_indicator)
+            anim.setDuration(200)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            anim.finished.connect(lambda: self._nav_indicator.setGraphicsEffect(None))
+            anim.start()
+            return
+
+        if hasattr(self, '_indicator_anim') and self._indicator_anim:
+            self._indicator_anim.stop()
+        self._indicator_anim = QPropertyAnimation(self._nav_indicator, b"geometry")
+        self._indicator_anim.setDuration(300)
+        self._indicator_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._indicator_anim.setStartValue(self._nav_indicator.geometry())
+        self._indicator_anim.setEndValue(target)
+        self._indicator_anim.start()
 
     def _build_char_page(self):
         page = self._make_theme_widget(QWidget())
@@ -934,6 +977,7 @@ class SettingsWindow(QWidget):
         self._current_page = "characters"
         for key, btn in self._nav_buttons.items():
             btn.setChecked(key == "characters")
+        self._animate_indicator("characters")
 
     def _on_apply(self):
         if self._launched:
