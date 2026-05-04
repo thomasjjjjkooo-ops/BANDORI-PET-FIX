@@ -31,6 +31,8 @@ class Live2DWidget(QOpenGLWidget):
 
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setAutoFillBackground(False)
         self.setMouseTracking(True)
 
     def set_fps(self, fps: int):
@@ -133,8 +135,7 @@ class Live2DWidget(QOpenGLWidget):
             return
         x = event.scenePosition().x()
         y = event.scenePosition().y()
-        alpha = self._get_alpha_at(x, y)
-        if alpha > 0:
+        if self._is_model_hit_at(x, y):
             self._dragging = True
             gpos = event.globalPosition()
             self._drag_start_x = gpos.x()
@@ -144,8 +145,7 @@ class Live2DWidget(QOpenGLWidget):
         if event.button() == Qt.MouseButton.RightButton:
             x = event.scenePosition().x()
             y = event.scenePosition().y()
-            alpha = self._get_alpha_at(x, y)
-            if alpha > 0 and self._right_click_callback:
+            if self._is_model_hit_at(x, y) and self._right_click_callback:
                 gpos = event.globalPosition()
                 self._right_click_callback(int(gpos.x()), int(gpos.y()))
             return
@@ -166,8 +166,35 @@ class Live2DWidget(QOpenGLWidget):
                 self._drag_start_x = gpos.x()
                 self._drag_start_y = gpos.y()
 
+    def alpha_at_global(self, global_pos: QPoint) -> int:
+        local = self.mapFromGlobal(global_pos)
+        if not self.rect().contains(local):
+            return 0
+        return self._get_alpha_at(local.x(), local.y())
+
+    def is_model_hit_at_global(self, global_pos: QPoint) -> bool:
+        local = self.mapFromGlobal(global_pos)
+        if not self.rect().contains(local):
+            return False
+        return self._is_model_hit_at(local.x(), local.y())
+
+    def _is_model_hit_at(self, x: float, y: float) -> bool:
+        if not self._model:
+            return False
+        try:
+            if hasattr(self._model, "HitPart"):
+                return bool(self._model.HitPart(x, y, topOnly=True))
+        except Exception:
+            pass
+        return self._get_alpha_at(x, y) > 8
+
     def _get_alpha_at(self, x: float, y: float) -> int:
         try:
+            if not self._initialized_gl or not self._model:
+                return 0
+            if x < 0 or y < 0 or x >= self.width() or y >= self.height():
+                return 0
+            self.makeCurrent()
             sx = int(x * self._system_scale)
             sy = int((self.height() - y) * self._system_scale)
             pixel = gl.glReadPixels(sx, sy, 1, 1, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE)

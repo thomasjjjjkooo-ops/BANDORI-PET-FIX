@@ -1,7 +1,11 @@
+import ctypes
+import ctypes.wintypes
 import os
+import random
+import re
 
-from PySide6.QtCore import Qt, QPoint
-from PySide6.QtGui import QColor, QIcon
+from PySide6.QtCore import Qt, QPoint, QTimer
+from PySide6.QtGui import QColor, QIcon, QCursor
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QApplication, QSystemTrayIcon, QMenu,
 )
@@ -15,6 +19,41 @@ from live2d_widget import Live2DWidget
 from model_manager import ModelManager
 from settings_window import SettingsWindow
 from radial_menu import RadialMenu
+
+
+WM_NCHITTEST = 0x0084
+HTTRANSPARENT = -1
+GWL_EXSTYLE = -20
+WS_EX_TRANSPARENT = 0x00000020
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
+SWP_NOZORDER = 0x0004
+SWP_NOACTIVATE = 0x0010
+SWP_FRAMECHANGED = 0x0020
+
+if os.name == "nt":
+    _user32 = ctypes.windll.user32
+    _get_window_long = _user32.GetWindowLongPtrW
+    _set_window_long = _user32.SetWindowLongPtrW
+    _set_window_pos = _user32.SetWindowPos
+    _get_window_long.argtypes = [ctypes.wintypes.HWND, ctypes.c_int]
+    _get_window_long.restype = ctypes.c_ssize_t
+    _set_window_long.argtypes = [ctypes.wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
+    _set_window_long.restype = ctypes.c_ssize_t
+    _set_window_pos.argtypes = [
+        ctypes.wintypes.HWND,
+        ctypes.wintypes.HWND,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_uint,
+    ]
+    _set_window_pos.restype = ctypes.wintypes.BOOL
+else:
+    _get_window_long = None
+    _set_window_long = None
+    _set_window_pos = None
 
 
 class PetWindow(QWidget):
@@ -34,10 +73,16 @@ class PetWindow(QWidget):
         self._radial_menu = None
         self._chat_window = None
         self._show_pos_set = False
+        self._motion_guard_token = 0
+        self._mouse_passthrough = False
+        self._passthrough_timer = QTimer(self)
+        self._passthrough_timer.setInterval(35)
+        self._passthrough_timer.timeout.connect(self._update_mouse_passthrough)
 
         self._init_ui()
         self._init_tray()
         self._load_initial_model()
+        self._passthrough_timer.start()
 
         self.setWindowOpacity(self._opacity)
 
@@ -49,7 +94,9 @@ class PetWindow(QWidget):
             | Qt.WindowType.NoDropShadowWindowHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_AlwaysStackOnTop, True)
+        self.setAutoFillBackground(False)
 
         self.resize(400, 500)
 
@@ -64,6 +111,54 @@ class PetWindow(QWidget):
         self._live2d_widget.set_right_click_callback(self._on_right_click)
         self._live2d_widget.set_fps(self._fps)
         layout.addWidget(self._live2d_widget)
+
+    def nativeEvent(self, event_type, message):
+        if os.name == "nt":
+            try:
+                msg = ctypes.wintypes.MSG.from_address(int(message))
+                if msg.message == WM_NCHITTEST:
+                    lparam = int(msg.lParam)
+                    x = ctypes.c_short(lparam & 0xFFFF).value
+                    y = ctypes.c_short((lparam >> 16) & 0xFFFF).value
+                    if not self._live2d_widget.is_model_hit_at_global(QPoint(x, y)):
+                        return True, HTTRANSPARENT
+            except Exception:
+                pass
+        return super().nativeEvent(event_type, message)
+
+    def _set_mouse_passthrough(self, enabled: bool):
+        if os.name != "nt" or enabled == self._mouse_passthrough:
+            return
+        self._apply_passthrough_to_hwnd(int(self.winId()), enabled)
+        self._mouse_passthrough = enabled
+
+    def _apply_passthrough_to_hwnd(self, hwnd: int, enabled: bool):
+        if not hwnd:
+            return
+        style = _get_window_long(hwnd, GWL_EXSTYLE)
+        if enabled:
+            style |= WS_EX_TRANSPARENT
+        else:
+            style &= ~WS_EX_TRANSPARENT
+        _set_window_long(hwnd, GWL_EXSTYLE, style)
+        _set_window_pos(
+            hwnd,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        )
+
+    def _update_mouse_passthrough(self):
+        if os.name != "nt" or not self.isVisible():
+            return
+        global_pos = QCursor.pos()
+        if not self.geometry().contains(global_pos):
+            self._set_mouse_passthrough(False)
+            return
+        self._set_mouse_passthrough(not self._live2d_widget.is_model_hit_at_global(global_pos))
 
     def set_fps(self, fps: int):
         self._fps = fps
@@ -229,21 +324,30 @@ class PetWindow(QWidget):
 
         char_prefix = self._current_char if self._current_char else "anon"
         normalized = action_name.strip().lower()
+        normalized = normalized.strip("[] \t\r\n")
+        normalized = normalized.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
 
         exp_names = list(model.expressions.keys()) if hasattr(model, 'expressions') else []
         exp_map = {}
         for ename in exp_names:
             l = ename.lower()
-            if "_" in l:
-                exp_map[l] = ename
+            exp_map[l] = ename
+            exp_map[os.path.splitext(l)[0]] = ename
 
         def _find_expression(tag: str) -> str | None:
             tag_low = tag.lower()
+            tag_base = os.path.splitext(tag_low)[0]
             if tag_low in exp_map:
                 return exp_map[tag_low]
-            prefix = f"{char_prefix}_{tag_low}"
+            if tag_base in exp_map:
+                return exp_map[tag_base]
+            prefix = f"{char_prefix}_{tag_base}"
             for ename in exp_names:
-                if ename.lower().startswith(prefix):
+                ename_low = ename.lower()
+                ename_base = os.path.splitext(ename_low)[0]
+                if ename_base.startswith(prefix):
+                    return ename
+                if ename_base.startswith(tag_base):
                     return ename
             return None
 
@@ -257,18 +361,24 @@ class PetWindow(QWidget):
         def _find_motion(tag: str) -> str | None:
             tag_low = tag.lower()
             prefix = f"{char_lower}_{tag_low}"
+            candidates = []
+            if tag_low == "thinking":
+                candidates.extend(["thinking", "nf", "nnf", "eeto", "odoodo"])
+            else:
+                candidates.append(tag_low)
+
             matches = []
-            for mname in motion_names:
-                mlow = mname.lower()
-                if mlow.startswith(prefix):
-                    matches.append(mname)
-            if not matches:
+            for candidate in candidates:
+                candidate_prefix = f"{char_lower}_{candidate}"
                 for mname in motion_names:
                     mlow = mname.lower()
-                    if char_lower in mlow and tag_low in mlow:
+                    if mlow == candidate or mlow.startswith(candidate):
+                        matches.append(mname)
+                    elif mlow == candidate_prefix or mlow.startswith(candidate_prefix):
+                        matches.append(mname)
+                    elif re.search(rf"(^|[_\-]){re.escape(candidate)}($|[_\-]?\d)", mlow):
                         matches.append(mname)
             if matches:
-                import random
                 return random.choice(matches)
             return None
 
@@ -320,12 +430,24 @@ class PetWindow(QWidget):
         motion = _find_motion(mapped)
         if motion:
             try:
-                model.StartMotion(motion, 0, self._live2d.MotionPriority.FORCE)
+                self._motion_guard_token += 1
+                token = self._motion_guard_token
+                model.StartMotion(
+                    motion,
+                    0,
+                    self._live2d.MotionPriority.FORCE,
+                    onFinishMotionHandler=self._on_motion_finished,
+                )
+                QTimer.singleShot(8000, lambda t=token: self._clear_motion_if_current(t))
             except Exception:
                 try:
+                    self._motion_guard_token += 1
+                    token = self._motion_guard_token
                     model.StartRandomMotion(
                         priority=self._live2d.MotionPriority.FORCE,
+                        onFinishMotionHandler=self._on_motion_finished,
                     )
+                    QTimer.singleShot(8000, lambda t=token: self._clear_motion_if_current(t))
                 except Exception:
                     pass
 
@@ -344,17 +466,29 @@ class PetWindow(QWidget):
         if model is None:
             return
         try:
+            self._motion_guard_token += 1
+            token = self._motion_guard_token
             model.StartRandomMotion(
                 priority=self._live2d.MotionPriority.FORCE,
                 onFinishMotionHandler=self._on_motion_finished,
             )
+            QTimer.singleShot(8000, lambda t=token: self._clear_motion_if_current(t))
         except Exception:
             pass
 
     def _on_motion_finished(self):
+        self._motion_guard_token += 1
         model = self._live2d_widget.model
         if model is not None:
             model.ClearMotions()
+
+    def _clear_motion_if_current(self, token: int):
+        if token != self._motion_guard_token:
+            return
+        model = self._live2d_widget.model
+        if model is not None:
+            model.ClearMotions()
+        self._motion_guard_token += 1
 
     def _on_lock_toggled(self, locked: bool):
         self._live2d_widget.set_drag_locked(locked)

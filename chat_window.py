@@ -2,8 +2,8 @@ from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QEasingCurve,
 from PySide6.QtGui import QFont, QColor, QPalette, QKeyEvent, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QTextEdit, QScrollArea, QSizePolicy, QToolButton,
-    QApplication, QGraphicsOpacityEffect,
+    QTextEdit, QScrollArea, QSizePolicy, QToolButton, QMenu,
+    QApplication, QGraphicsOpacityEffect, QWidgetAction,
 )
 
 from qfluentwidgets import BodyLabel, StrongBodyLabel, FluentIcon, isDarkTheme
@@ -112,6 +112,85 @@ class IconButton(QToolButton):
             QToolButton:pressed {{ background: {pressed}; }}
             QToolButton:disabled {{ background: {'#252932' if dark else '#e6ebf3'}; color: {'#6b7280' if dark else '#a0a8b8'}; }}
         """)
+
+
+class ConversationHistoryRow(QWidget):
+    selected = Signal(int)
+    delete_requested = Signal(int)
+
+    def __init__(self, conv_id: int, title: str, current: bool, parent=None):
+        super().__init__(parent)
+        self._conv_id = conv_id
+        self._current = current
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedSize(288, 36)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 4, 6, 4)
+        layout.setSpacing(8)
+
+        marker = QLabel("✓" if current else "", self)
+        marker.setFixedWidth(14)
+        marker.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(marker)
+
+        label = QLabel(title, self)
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        layout.addWidget(label, 1)
+
+        delete_btn = QToolButton(self)
+        delete_btn.setText("×")
+        delete_btn.setFixedSize(24, 24)
+        delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        delete_btn.setToolTip(self.tr("Delete conversation"))
+        delete_btn.clicked.connect(self._emit_delete)
+        layout.addWidget(delete_btn)
+
+        self._marker = marker
+        self._label = label
+        self._delete_btn = delete_btn
+        self.apply_theme()
+
+    def apply_theme(self):
+        dark = isDarkTheme()
+        bg = "#263044" if self._current and dark else "#eef4ff" if self._current else "transparent"
+        text = "#f7f7fb" if dark else "#1f2328"
+        marker = _TELEGRAM_ACCENT if self._current else "transparent"
+        danger = "#ff6b6b" if dark else "#c42b1c"
+        hover = "#3a2630" if dark else "#fde7e9"
+        self.setStyleSheet(f"""
+            ConversationHistoryRow {{
+                background: {bg};
+                border-radius: 6px;
+            }}
+            QLabel {{
+                color: {text};
+                background: transparent;
+            }}
+            QToolButton {{
+                background: transparent;
+                color: {danger};
+                border: none;
+                border-radius: 12px;
+                font-size: 18px;
+                font-weight: 700;
+                padding-bottom: 2px;
+            }}
+            QToolButton:hover {{
+                background: {hover};
+            }}
+        """)
+        self._marker.setStyleSheet(f"color: {marker}; background: transparent; font-weight: 700;")
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and not self._delete_btn.geometry().contains(event.position().toPoint()):
+            self.selected.emit(self._conv_id)
+        super().mouseReleaseEvent(event)
+
+    def _emit_delete(self):
+        self.delete_requested.emit(self._conv_id)
 
 
 class MessageBubble(QWidget):
@@ -278,8 +357,11 @@ class ChatWindow(QWidget):
         self._worker = None
         self._current_bubble: MessageBubble | None = None
         self._pending_actions: list[str] = []
+        self._seen_actions: set[str] = set()
         self._stream_buffer = ""
         self._visible_stream_text = ""
+        self._pending_actions.clear()
+        self._seen_actions.clear()
         self._stream_flush_timer = QTimer(self)
         self._stream_flush_timer.setInterval(28)
         self._stream_flush_timer.timeout.connect(self._flush_stream_text)
@@ -352,6 +434,9 @@ class ChatWindow(QWidget):
         avatar.setObjectName("TitleAvatar")
         avatar.setFixedSize(34, 34)
         avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        avatar.setCursor(Qt.CursorShape.PointingHandCursor)
+        avatar.setToolTip(self.tr("Conversation history"))
+        avatar.mousePressEvent = self._on_title_avatar_pressed
         layout.addWidget(avatar)
 
         title_stack = QVBoxLayout()
@@ -569,6 +654,150 @@ class ChatWindow(QWidget):
                 bubbles.append(widget)
         return bubbles
 
+    def _clear_message_widgets(self):
+        if self._msg_layout.count() > 0:
+            item = self._msg_layout.takeAt(self._msg_layout.count() - 1)
+            if item:
+                del item
+        for i in range(self._msg_layout.count() - 1, -1, -1):
+            item = self._msg_layout.takeAt(i)
+            widget = item.widget() if item else None
+            if widget:
+                widget.deleteLater()
+            if item:
+                del item
+        self._msg_layout.addStretch()
+
+    def _conversation_title(self, conv: dict) -> str:
+        messages = self._db.get_messages(conv["id"])
+        preview = ""
+        for msg in messages:
+            if msg["role"] == "user" and msg["content"].strip():
+                preview = msg["content"].strip().replace("\n", " ")
+                break
+        if not preview:
+            preview = conv.get("title") or self.tr("Empty conversation")
+        if len(preview) > 28:
+            preview = preview[:28] + "..."
+        created_at = conv.get("created_at", "")
+        time_text = created_at[5:16] if len(created_at) >= 16 else created_at
+        return f"{time_text}  {preview}".strip()
+
+    def _on_title_avatar_pressed(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        self._show_conversation_history()
+
+    def _show_conversation_history(self):
+        if self._worker and self._worker.isRunning():
+            return
+        menu = QMenu(self)
+        menu.setObjectName("ConversationHistoryMenu")
+        dark = isDarkTheme()
+        bg = "#1b1f29" if dark else "#ffffff"
+        hover = "#263044" if dark else "#eef4ff"
+        border = "#303849" if dark else "#d8deea"
+        text = "#f7f7fb" if dark else "#1f2328"
+        muted = "#9aa5bd" if dark else "#657089"
+        menu.setStyleSheet(f"""
+            QMenu#ConversationHistoryMenu {{
+                background: {bg};
+                color: {text};
+                border: 1px solid {border};
+                border-radius: 10px;
+                padding: 6px;
+            }}
+            QMenu#ConversationHistoryMenu::item {{
+                padding: 8px 28px 8px 10px;
+                border-radius: 6px;
+                min-width: 288px;
+            }}
+            QMenu#ConversationHistoryMenu::item:selected {{
+                background: {hover};
+            }}
+            QMenu#ConversationHistoryMenu::separator {{
+                height: 1px;
+                background: {border};
+                margin: 6px 4px;
+            }}
+            QMenu#ConversationHistoryMenu::item:disabled {{
+                color: {muted};
+            }}
+        """)
+
+        title = menu.addAction(self.tr("Conversation history"))
+        title.setEnabled(False)
+        menu.addSeparator()
+
+        conversations = self._db.get_conversations(self._character)
+        if not conversations:
+            empty = menu.addAction(self.tr("No conversations yet"))
+            empty.setEnabled(False)
+        else:
+            for conv in conversations:
+                row = ConversationHistoryRow(
+                    conv["id"],
+                    self._conversation_title(conv),
+                    conv["id"] == self._conv_id,
+                    menu,
+                )
+                row.selected.connect(lambda conv_id: self._select_history_row(menu, conv_id))
+                row.delete_requested.connect(lambda conv_id: self._delete_history_row(menu, conv_id))
+                action = QWidgetAction(menu)
+                action.setDefaultWidget(row)
+                menu.addAction(action)
+
+        menu.addSeparator()
+        new_action = menu.addAction(self.tr("New conversation"))
+        new_action.triggered.connect(self._new_conversation)
+
+        pos = self._title_avatar.mapToGlobal(self._title_avatar.rect().bottomLeft())
+        menu.exec(pos)
+
+    def _select_history_row(self, menu: QMenu, conv_id: int):
+        menu.close()
+        self._switch_conversation(conv_id)
+
+    def _delete_history_row(self, menu: QMenu, conv_id: int):
+        menu.close()
+        self._delete_conversation(conv_id)
+
+    def _switch_conversation(self, conv_id: int):
+        if conv_id == self._conv_id:
+            return
+        if self._worker and self._worker.isRunning():
+            return
+        self._stream_flush_timer.stop()
+        self._stream_buffer = ""
+        self._visible_stream_text = ""
+        self._current_bubble = None
+        self._conv_id = conv_id
+        self._clear_message_widgets()
+        self._load_messages()
+        self._input.setFocus()
+
+    def _delete_conversation(self, conv_id: int):
+        if self._worker and self._worker.isRunning():
+            return
+        was_current = conv_id == self._conv_id
+        self._db.delete_conversation(conv_id)
+
+        if not was_current:
+            return
+
+        conversations = self._db.get_conversations(self._character)
+        self._stream_flush_timer.stop()
+        self._stream_buffer = ""
+        self._visible_stream_text = ""
+        self._current_bubble = None
+        self._clear_message_widgets()
+        if conversations:
+            self._conv_id = conversations[0]["id"]
+            self._load_messages()
+        else:
+            self._conv_id = self._db.create_conversation(self._character)
+        self._input.setFocus()
+
     def _set_busy(self, busy: bool):
         self._input.setEnabled(not busy)
         self._send_btn.setEnabled(not busy)
@@ -606,12 +835,7 @@ class ChatWindow(QWidget):
         self._load_messages()
 
     def _new_conversation(self):
-        self._msg_layout.removeItem(self._msg_layout.itemAt(self._msg_layout.count() - 1))
-        for i in range(self._msg_layout.count() - 1, -1, -1):
-            item = self._msg_layout.itemAt(i)
-            if item and item.widget():
-                item.widget().deleteLater()
-        self._msg_layout.addStretch()
+        self._clear_message_widgets()
         self._conv_id = self._db.create_conversation(self._character)
 
     def _load_messages(self):
@@ -687,7 +911,6 @@ class ChatWindow(QWidget):
         self._worker.start()
 
     def _on_chunk_received(self, text: str):
-        self._pending_actions.extend(parse_action_tags(text))
         clean = strip_action_tags(text)
         if clean:
             self._stream_buffer += clean
@@ -695,7 +918,6 @@ class ChatWindow(QWidget):
                 self._current_bubble.set_streaming(True)
             if not self._stream_flush_timer.isActive():
                 self._stream_flush_timer.start()
-        self._flush_actions()
 
     def _flush_stream_text(self):
         if not self._current_bubble:
@@ -773,6 +995,10 @@ class ChatWindow(QWidget):
         if not self._pending_actions:
             return
         for action in self._pending_actions:
+            key = action.strip().lower()
+            if key in self._seen_actions:
+                continue
+            self._seen_actions.add(key)
             self.action_triggered.emit(action)
         self._pending_actions.clear()
 

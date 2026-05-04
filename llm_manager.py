@@ -224,6 +224,7 @@ class NonStreamWorker(QThread):
 
 
 ACTION_PATTERN = re.compile(r"\[([^\]]+)\]")
+_ACTION_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_.\-]+$")
 
 
 def parse_action_tags(text: str) -> list[str]:
@@ -232,7 +233,10 @@ def parse_action_tags(text: str) -> list[str]:
     seen = set()
     result = []
     for tag in tags:
+        tag = tag.strip()
         if tag.lower() in ("done", "d o n e"):
+            continue
+        if not _ACTION_TOKEN_PATTERN.match(tag):
             continue
         if tag not in seen:
             seen.add(tag)
