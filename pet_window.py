@@ -167,6 +167,8 @@ class PetWindow(QWidget):
 
         self._radial_menu = RadialMenu()
         self._radial_menu.set_animation_fps(self._fps)
+        self._radial_menu.set_locked(self._live2d_widget._drag_locked)
+        self._radial_menu.lock_toggled.connect(self._on_lock_toggled)
         self._radial_menu.closed.connect(lambda: setattr(self, '_radial_menu', None))
 
         self._radial_menu.add_item(
@@ -215,6 +217,9 @@ class PetWindow(QWidget):
         if model is not None:
             model.ClearMotions()
 
+    def _on_lock_toggled(self, locked: bool):
+        self._live2d_widget.set_drag_locked(locked)
+
     def _on_radial_pixel(self):
         pass
 
@@ -256,6 +261,7 @@ class PetWindow(QWidget):
             self._cfg.set("fps", self._fps)
             self._cfg.set("opacity", self._opacity)
             self._cfg.set("dark_theme", isDarkTheme())
+            self._cfg.set("drag_locked", self._live2d_widget._drag_locked)
             self._cfg.set("window_x", self.x())
             self._cfg.set("window_y", self.y())
             self._cfg.set("window_width", self.width())

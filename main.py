@@ -93,6 +93,8 @@ def main():
             pet.move(x, y)
             pet._show_pos_set = True
         pet.show()
+        if cfg.get("drag_locked", False):
+            pet._live2d_widget.set_drag_locked(True)
         pet_window_ref["window"] = pet
 
     from settings_window import SettingsWindow

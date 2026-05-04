@@ -4,15 +4,15 @@ from dataclasses import dataclass
 from typing import Callable
 
 from PySide6.QtCore import (
-    Qt, Signal, QPoint, QPropertyAnimation, QEasingCurve, QRectF,
-    QParallelAnimationGroup, QSequentialAnimationGroup, QTimer,
+    Qt, Signal, QPoint, QPropertyAnimation, QEasingCurve,
+    QParallelAnimationGroup,
 )
 from PySide6.QtGui import (
     QPainter, QColor, QFont, QPen, QBrush, QMouseEvent,
-    QPainterPath, QRadialGradient, QFontMetrics, QIcon, QPixmap,
+    QRadialGradient, QFontMetrics, QPixmap,
 )
 from PySide6.QtWidgets import (
-    QWidget, QApplication, QGraphicsOpacityEffect, QVBoxLayout, QLabel,
+    QWidget, QGraphicsOpacityEffect,
 )
 
 
@@ -42,7 +42,6 @@ class RadialMenuItem(QWidget):
         r = min(w, h) / 2 - 4
 
         color = self._color.lighter(130) if self._hover else self._color
-        alpha = 220 if self._hover else 180
 
         p.setPen(Qt.PenStyle.NoPen)
 
@@ -104,6 +103,7 @@ class _ItemData:
 
 class RadialMenu(QWidget):
     closed = Signal()
+    lock_toggled = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -121,10 +121,19 @@ class RadialMenu(QWidget):
         self._center = QPoint(0, 0)
         self._radius = 110
         self._anim_group = None
-        self._center_dot_r = 30
         self._fps = 120
+        self._locked = False
+        self._center_hover = False
 
-        self.escape_action = None
+        self.setMouseTracking(True)
+
+    @property
+    def locked(self):
+        return self._locked
+
+    def set_locked(self, locked: bool):
+        self._locked = locked
+        self.update()
 
     def set_animation_fps(self, fps: int):
         self._fps = max(30, min(fps, 240))
@@ -255,6 +264,18 @@ class RadialMenu(QWidget):
         else:
             super().keyPressEvent(event)
 
+    def mouseMoveEvent(self, event: QMouseEvent):
+        cx = self.width() // 2
+        cy = self.height() // 2
+        dx = event.pos().x() - cx
+        dy = event.pos().y() - cy
+        dist = (dx * dx + dy * dy) ** 0.5
+        was_hover = self._center_hover
+        self._center_hover = dist < 40
+        if was_hover != self._center_hover:
+            self.update()
+        super().mouseMoveEvent(event)
+
     def mousePressEvent(self, event: QMouseEvent):
         cx = self.width() // 2
         cy = self.height() // 2
@@ -262,10 +283,37 @@ class RadialMenu(QWidget):
         dy = event.pos().y() - cy
         dist = (dx * dx + dy * dy) ** 0.5
 
-        if dist > self._radius + 50:
+        if dist < 40:
+            self._locked = not self._locked
+            self.lock_toggled.emit(self._locked)
+            self.update()
+        elif dist > self._radius + 50:
             self.dismiss()
         else:
             super().mousePressEvent(event)
 
     def paintEvent(self, event):
-        pass
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        cx = self.width() // 2
+        cy = self.height() // 2
+        rr = 30
+
+        base = QColor("#3a3a3a") if self._center_hover else QColor("#2a2a2a")
+        p.setPen(QPen(QColor("#555555"), 2))
+        gradient = QRadialGradient(cx, cy - rr * 0.2, rr * 1.2)
+        gradient.setColorAt(0, base.lighter(140))
+        gradient.setColorAt(0.7, base)
+        gradient.setColorAt(1, base.darker(140))
+        p.setBrush(QBrush(gradient))
+        p.drawEllipse(QPoint(int(cx), int(cy)), rr, rr)
+
+        glyph = "\U0001F512" if self._locked else "\U0001F513"
+        font = p.font()
+        font.setPointSize(18)
+        p.setFont(font)
+        fm = QFontMetrics(font)
+        g_w = fm.horizontalAdvance(glyph)
+        p.setPen(QColor(255, 255, 255, 200))
+        p.drawText(int(cx - g_w / 2), int(cy + 6), glyph)

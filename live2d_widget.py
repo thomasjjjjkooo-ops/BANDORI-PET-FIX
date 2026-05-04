@@ -24,6 +24,7 @@ class Live2DWidget(QOpenGLWidget):
         self._window_drag_callback = None
         self._click_callback = None
         self._right_click_callback = None
+        self._drag_locked = False
         self._initialized_gl = False
         self._fps = 120
         self._timer_id = None
@@ -49,6 +50,9 @@ class Live2DWidget(QOpenGLWidget):
 
     def set_right_click_callback(self, cb):
         self._right_click_callback = cb
+
+    def set_drag_locked(self, locked: bool):
+        self._drag_locked = locked
 
     def set_model_path(self, model_json_path: str):
         self._pending_model = model_json_path
@@ -121,6 +125,9 @@ class Live2DWidget(QOpenGLWidget):
         self.update()
 
     def mousePressEvent(self, event: QMouseEvent):
+        if self._drag_locked:
+            super().mousePressEvent(event)
+            return
         if event.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(event)
             return
@@ -148,6 +155,8 @@ class Live2DWidget(QOpenGLWidget):
             self._click_callback()
 
     def mouseMoveEvent(self, event: QMouseEvent):
+        if self._drag_locked:
+            return
         if self._dragging and self._window_drag_callback:
             gpos = event.globalPosition()
             dx = int(gpos.x() - self._drag_start_x)
