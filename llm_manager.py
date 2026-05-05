@@ -2,6 +2,7 @@ import json
 import re
 import urllib.request
 import urllib.error
+from pathlib import Path
 from PySide6.QtCore import QThread, Signal
 
 
@@ -93,12 +94,75 @@ COMMON_RULES = (
     '动作只能且必须使用规定的纯英文标签（如[smile]）！'
 )
 
+_BASE_DIR = Path(__file__).resolve().parent
+_CHARACTERS_DIR = _BASE_DIR / "characters"
+_OUTFIT_MD_PATH = _BASE_DIR / "OUTFIT.md"
+_CHAR_MD_CACHE: dict[str, str] | None = None
+
+
+def _build_key_to_name_mapping() -> dict[str, str]:
+    if not _OUTFIT_MD_PATH.exists():
+        return {}
+    text = _OUTFIT_MD_PATH.read_text(encoding="utf-8")
+    sections = re.split(r"\n## \d+\. ", text)
+    mapping = {}
+    for section in sections[1:]:
+        lines = section.strip().split("\n")
+        header = lines[0].strip()
+        m = re.match(r"(.+?)\s*\((\w+)\)", header)
+        if m:
+            display_name = m.group(1).strip()
+            key = m.group(2).strip()
+            mapping[key] = display_name
+    return mapping
+
+
+def _scan_character_md_files() -> dict[str, str]:
+    result: dict[str, str] = {}
+    if not _CHARACTERS_DIR.exists():
+        return result
+
+    key_to_name = _build_key_to_name_mapping()
+    name_to_key = {v: k for k, v in key_to_name.items()}
+
+    for entry in sorted(_CHARACTERS_DIR.iterdir()):
+        if not entry.is_dir():
+            continue
+        key = name_to_key.get(entry.name)
+        if not key:
+            continue
+
+        md_files = sorted([f for f in entry.iterdir() if f.suffix == ".md"])
+        if not md_files:
+            continue
+
+        parts = []
+        for md_file in md_files:
+            parts.append(md_file.read_text(encoding="utf-8"))
+        result[key] = "\n\n".join(parts)
+
+    return result
+
+
+def _get_character_md_prompt(character: str) -> str:
+    global _CHAR_MD_CACHE
+    if _CHAR_MD_CACHE is None:
+        _CHAR_MD_CACHE = _scan_character_md_files()
+    return _CHAR_MD_CACHE.get(character, "")
+
 
 def build_system_prompt(character: str) -> str:
     base = CHARACTER_PROMPTS.get(character, CHARACTER_PROMPTS.get("anon", ""))
     if not base:
         return ""
-    return base + "\n\n" + COMMON_RULES
+
+    prompt = base + "\n\n" + COMMON_RULES
+
+    md_prompt = _get_character_md_prompt(character)
+    if md_prompt:
+        prompt = md_prompt + "\n\n" + prompt
+
+    return prompt
 
 
 class LLMStreamWorker(QThread):

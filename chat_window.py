@@ -11,6 +11,8 @@ from i18n_manager import tr as _tr
 from qfluentwidgets import BodyLabel, StrongBodyLabel, FluentIcon, isDarkTheme
 from qfluentwidgets.common.config import qconfig
 
+from datetime import datetime
+
 from llm_manager import (
     build_system_prompt, LLMStreamWorker, NonStreamWorker,
     parse_action_tags, strip_action_tags,
@@ -992,6 +994,14 @@ class ChatWindow(QWidget):
             max_history = 20
             for m in history[-(max_history * 2):]:
                 messages.append({"role": m["role"], "content": m["content"]})
+
+        now = datetime.now()
+        time_str = now.strftime("%Y-%m-%d %I:%M %p")
+        time_suffix = f"\n\n【后置提示词】\n当前时间：{time_str}"
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i]["role"] == "user":
+                messages[i]["content"] += time_suffix
+                break
 
         use_stream = True
         if use_stream:
