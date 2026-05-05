@@ -228,7 +228,7 @@ class SettingsWindow(QWidget):
 
     def __init__(self, model_manager, current_char="", current_costume="",
                  current_fps=120, current_opacity=1.0, show_launch=True,
-                 start_on_costumes=False, config_manager=None):
+                 start_on_costumes=False, config_manager=None, vsync=True):
         super().__init__()
         self._model_manager = model_manager
         self._current_char = current_char or model_manager.characters[0]
@@ -244,6 +244,7 @@ class SettingsWindow(QWidget):
         self._pages: dict[str, QWidget] = {}
         self._nav_buttons: dict[str, NavButton] = {}
         self._current_page = "characters"
+        self._vsync = vsync
 
         self.setWindowTitle(_tr("SettingsWindow.title"))
         self.setMinimumSize(1050, 650)
@@ -910,6 +911,20 @@ class SettingsWindow(QWidget):
         layout.addWidget(self._fps_slider)
         layout.addWidget(self._fps_value)
 
+        vsync_label = BodyLabel(_tr("SettingsWindow.side_vsync"), panel)
+        self._vsync_switch = SwitchButton(panel)
+        self._vsync_switch.setChecked(self._vsync)
+        self._vsync_switch.checkedChanged.connect(self._on_vsync_changed)
+        vsync_row = QHBoxLayout()
+        vsync_row.addWidget(vsync_label)
+        vsync_row.addStretch()
+        vsync_row.addWidget(self._vsync_switch)
+        layout.addLayout(vsync_row)
+
+        if self._vsync:
+            self._fps_slider.setEnabled(False)
+            self._fps_value.setEnabled(False)
+
         opacity_label = BodyLabel(_tr("SettingsWindow.side_opacity"), panel)
         layout.addWidget(opacity_label)
         self._opacity_slider = Slider(Qt.Orientation.Horizontal, panel)
@@ -1012,6 +1027,11 @@ class SettingsWindow(QWidget):
             btn.setChecked(key == "characters")
         self._animate_indicator("characters")
 
+    def _on_vsync_changed(self, checked: bool):
+        self._vsync = checked
+        self._fps_slider.setEnabled(not checked)
+        self._fps_value.setEnabled(not checked)
+
     def _on_apply(self):
         if self._launched:
             return
@@ -1023,6 +1043,7 @@ class SettingsWindow(QWidget):
             "fps": self._fps_slider.value(),
             "opacity": self._opacity_slider.value() / 100.0,
             "dark_theme": self._theme_switch.isChecked(),
+            "vsync": self._vsync_switch.isChecked(),
         })
         if self._show_launch:
             self.launch_requested.emit()

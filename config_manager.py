@@ -11,6 +11,7 @@ DEFAULTS = {
     "fps": 120,
     "opacity": 1.0,
     "dark_theme": False,
+    "vsync": True,
     "drag_locked": False,
     "window_x": -1,
     "window_y": -1,

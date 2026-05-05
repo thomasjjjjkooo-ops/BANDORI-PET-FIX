@@ -5,6 +5,18 @@ from PySide6.QtGui import QMouseEvent, QCursor, QGuiApplication, QSurfaceFormat
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
 
+def _get_display_refresh():
+    try:
+        screen = QGuiApplication.primaryScreen()
+        if screen:
+            rr = screen.refreshRate()
+            if rr > 0:
+                return rr
+    except Exception:
+        pass
+    return 60
+
+
 class Live2DWidget(QOpenGLWidget):
     def __init__(self, parent=None):
         fmt = QSurfaceFormat()
@@ -27,6 +39,7 @@ class Live2DWidget(QOpenGLWidget):
         self._drag_locked = False
         self._initialized_gl = False
         self._fps = 120
+        self._vsync = True
         self._timer_id = None
 
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
@@ -35,11 +48,32 @@ class Live2DWidget(QOpenGLWidget):
         self.setAutoFillBackground(False)
         self.setMouseTracking(True)
 
-    def set_fps(self, fps: int):
-        self._fps = max(10, min(fps, 240))
+    def _effective_fps(self):
+        if self._vsync:
+            return _get_display_refresh()
+        return max(10, self._fps)
+
+    def _restart_timer(self):
         if self._timer_id is not None:
             self.killTimer(self._timer_id)
-            self._timer_id = self.startTimer(int(1000 / self._fps))
+            self._timer_id = self.startTimer(int(1000 / self._effective_fps()))
+
+    def set_fps(self, fps: int):
+        self._fps = max(10, min(fps, 240))
+        if not self._vsync and self._timer_id is not None:
+            self._restart_timer()
+
+    def set_vsync(self, enabled: bool):
+        self._vsync = enabled
+        if not self._initialized_gl:
+            return
+        self.makeCurrent()
+        try:
+            from OpenGL.WGL.EXT.swap_control import wglSwapIntervalEXT
+            wglSwapIntervalEXT(1 if enabled else 0)
+        except Exception:
+            pass
+        self._restart_timer()
 
     def set_live2d_module(self, module):
         self._live2d = module
@@ -90,7 +124,7 @@ class Live2DWidget(QOpenGLWidget):
         self._initialized_gl = True
         if self._pending_model:
             self._load_model_internal(self._pending_model)
-        self._timer_id = self.startTimer(int(1000 / self._fps))
+        self._timer_id = self.startTimer(int(1000 / self._effective_fps()))
 
     def resizeGL(self, w: int, h: int):
         gl.glViewport(0, 0, int(w * self._system_scale), int(h * self._system_scale))

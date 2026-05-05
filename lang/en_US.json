@@ -40,6 +40,7 @@
     "SettingsWindow.fps_value": "{v} FPS",
     "SettingsWindow.side_opacity": "Opacity",
     "SettingsWindow.opacity_value": "{v}%",
+    "SettingsWindow.side_vsync": "V-Sync",
     "SettingsWindow.side_dark_theme": "Dark Theme",
     "SettingsWindow.language": "Language",
     "SettingsWindow.apply_launch": "Apply & Launch",

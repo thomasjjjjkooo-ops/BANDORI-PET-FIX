@@ -69,6 +69,7 @@ class PetWindow(QWidget):
         self._current_costume = costume
         self._fps = fps
         self._opacity = opacity
+        self._vsync = True
         self._tray_icon = None
         self._settings_window = None
         self._cfg = config_manager
@@ -166,6 +167,10 @@ class PetWindow(QWidget):
         self._fps = fps
         self._live2d_widget.set_fps(fps)
 
+    def set_vsync(self, enabled: bool):
+        self._vsync = enabled
+        self._live2d_widget.set_vsync(enabled)
+
     def _init_tray(self):
         self._tray_icon = QSystemTrayIcon(self)
         icon_path = os.path.join(
@@ -239,6 +244,9 @@ class PetWindow(QWidget):
             self.set_opacity(data["opacity"])
         if "dark_theme" in data:
             setTheme(Theme.DARK if data["dark_theme"] else Theme.LIGHT)
+        if "vsync" in data:
+            self._vsync = data["vsync"]
+            self._live2d_widget.set_vsync(data["vsync"])
         self._save_config()
 
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason):
@@ -519,6 +527,7 @@ class PetWindow(QWidget):
             show_launch=False,
             start_on_costumes=start_on_costumes,
             config_manager=self._cfg,
+            vsync=self._vsync,
         )
         self._settings_window.model_selected.connect(self._switch_model)
         self._settings_window.settings_changed.connect(self._apply_settings)
@@ -540,6 +549,7 @@ class PetWindow(QWidget):
             self._cfg.set("fps", self._fps)
             self._cfg.set("opacity", self._opacity)
             self._cfg.set("dark_theme", isDarkTheme())
+            self._cfg.set("vsync", self._vsync)
             self._cfg.set("drag_locked", self._live2d_widget._drag_locked)
             self._cfg.set("window_x", self.x())
             self._cfg.set("window_y", self.y())

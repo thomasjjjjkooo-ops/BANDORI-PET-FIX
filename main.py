@@ -75,6 +75,7 @@ def main():
         pet_window_ref["fps"] = data.get("fps", 120)
         pet_window_ref["opacity"] = data.get("opacity", 1.0)
         pet_window_ref["dark"] = data.get("dark_theme", False)
+        pet_window_ref["vsync"] = data.get("vsync", True)
 
     def launch_pet():
         from pet_window import PetWindow
@@ -98,6 +99,7 @@ def main():
             pet.move(x, y)
             pet._show_pos_set = True
         pet.show()
+        pet._live2d_widget.set_vsync(pet_window_ref.get("vsync", cfg.get("vsync", True)))
         if cfg.get("drag_locked", False):
             pet._live2d_widget.set_drag_locked(True)
         pet_window_ref["window"] = pet
@@ -112,13 +114,13 @@ def main():
         if mgr.characters:
             char = mgr.characters[0]
             costume = mgr.get_default_costume(char)
-    else:
-        pet_window_ref["char"] = char
-        pet_window_ref["costume"] = costume
 
     app.aboutToQuit.connect(save_config)
 
     if model_valid:
+        pet_window_ref["char"] = char
+        pet_window_ref["costume"] = costume
+        pet_window_ref["vsync"] = cfg.get("vsync", True)
         launch_pet()
     else:
         from settings_window import SettingsWindow
@@ -130,6 +132,7 @@ def main():
             current_opacity=cfg.get("opacity", 1.0),
             show_launch=True,
             config_manager=cfg,
+            vsync=cfg.get("vsync", True),
         )
         if cfg.get("dark_theme", False):
             settings._theme_switch.setChecked(True)
