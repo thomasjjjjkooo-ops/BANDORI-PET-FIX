@@ -5,7 +5,7 @@ from typing import Callable
 
 from PySide6.QtCore import (
     Qt, Signal, QPoint, QPropertyAnimation, QEasingCurve,
-    QParallelAnimationGroup,
+    QParallelAnimationGroup, QVariantAnimation,
 )
 from PySide6.QtGui import (
     QPainter, QColor, QFont, QPen, QBrush, QMouseEvent,
@@ -124,6 +124,10 @@ class RadialMenu(QWidget):
         self._fps = 120
         self._locked = False
         self._center_hover = False
+        self._center_opacity = 1.0
+        self._center_scale = 1.0
+        self._center_anim_value = 1.0
+        self._lock_anim = None
 
         self.setMouseTracking(True)
 
@@ -133,7 +137,51 @@ class RadialMenu(QWidget):
 
     def set_locked(self, locked: bool):
         self._locked = locked
+        self._center_opacity = 1.0
+        self._center_scale = 1.0
+        self._center_anim_value = 1.0
         self.update()
+
+    def _set_center_reveal_value(self, value: float):
+        self._center_anim_value = value
+        self._center_opacity = value
+        self._center_scale = 0.72 + 0.28 * value
+        self.update()
+
+    def _set_center_anim_value(self, value: float):
+        if value < 0.5:
+            t = value / 0.5
+            self._center_opacity = 1.0 - t
+            self._center_scale = 1.0 - 0.16 * t
+        else:
+            t = (value - 0.5) / 0.5
+            self._center_opacity = t
+            self._center_scale = 0.84 + 0.16 * t
+        self.update()
+
+    def _toggle_locked(self):
+        if self._lock_anim and self._lock_anim.state() == QVariantAnimation.State.Running:
+            return
+
+        anim = QVariantAnimation(self)
+        anim.setDuration(180)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+
+        switched = {"done": False}
+
+        def update(value):
+            if value >= 0.5 and not switched["done"]:
+                switched["done"] = True
+                self._locked = not self._locked
+                self.lock_toggled.emit(self._locked)
+            self._set_center_anim_value(float(value))
+
+        anim.valueChanged.connect(update)
+        anim.finished.connect(lambda: self._set_center_anim_value(1.0))
+        self._lock_anim = anim
+        anim.start()
 
     def set_animation_fps(self, fps: int):
         self._fps = max(30, min(fps, 240))
@@ -168,6 +216,7 @@ class RadialMenu(QWidget):
 
         self._center = center
         self._is_showing = True
+        self._set_center_reveal_value(0.0)
 
         n = len(self._items)
         if n == 0:
@@ -216,6 +265,14 @@ class RadialMenu(QWidget):
             op_anim.setDuration(max(120, self._show_duration() - 50))
             group.addAnimation(op_anim)
 
+        center_anim = QVariantAnimation(self)
+        center_anim.setStartValue(0.0)
+        center_anim.setEndValue(1.0)
+        center_anim.setDuration(max(140, self._show_duration() - 30))
+        center_anim.setEasingCurve(QEasingCurve.Type.OutBack)
+        center_anim.valueChanged.connect(lambda v: self._set_center_reveal_value(float(v)))
+        group.addAnimation(center_anim)
+
         self._anim_group = group
         group.start()
 
@@ -236,6 +293,14 @@ class RadialMenu(QWidget):
             op_anim.setEndValue(0.0)
             op_anim.setDuration(max(80, self._hide_duration() - 50))
             group.addAnimation(op_anim)
+
+        center_anim = QVariantAnimation(self)
+        center_anim.setStartValue(self._center_anim_value)
+        center_anim.setEndValue(0.0)
+        center_anim.setDuration(max(90, self._hide_duration() - 20))
+        center_anim.setEasingCurve(QEasingCurve.Type.InBack)
+        center_anim.valueChanged.connect(lambda v: self._set_center_reveal_value(float(v)))
+        group.addAnimation(center_anim)
 
         group.finished.connect(self._on_hide_finished)
         self._anim_group = group
@@ -284,9 +349,7 @@ class RadialMenu(QWidget):
         dist = (dx * dx + dy * dy) ** 0.5
 
         if dist < 40:
-            self._locked = not self._locked
-            self.lock_toggled.emit(self._locked)
-            self.update()
+            self._toggle_locked()
         elif dist > self._radius + 50:
             self.dismiss()
         else:
@@ -298,9 +361,10 @@ class RadialMenu(QWidget):
 
         cx = self.width() // 2
         cy = self.height() // 2
-        rr = 30
+        rr = 30 * self._center_scale
 
         base = QColor("#3a3a3a") if self._center_hover else QColor("#2a2a2a")
+        p.setOpacity(self._center_opacity)
         p.setPen(QPen(QColor("#555555"), 2))
         gradient = QRadialGradient(cx, cy - rr * 0.2, rr * 1.2)
         gradient.setColorAt(0, base.lighter(140))
@@ -317,3 +381,4 @@ class RadialMenu(QWidget):
         g_w = fm.horizontalAdvance(glyph)
         p.setPen(QColor(255, 255, 255, 200))
         p.drawText(int(cx - g_w / 2), int(cy + 6), glyph)
+        p.setOpacity(1.0)

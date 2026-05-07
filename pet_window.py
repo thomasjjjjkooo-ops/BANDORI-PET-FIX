@@ -526,19 +526,27 @@ class PetWindow(QWidget):
         except Exception:
             pass
 
-    def _on_motion_finished(self):
+    def _on_motion_finished(self, *_args):
         self._motion_guard_token += 1
-        self._start_idle_motion()
+        QTimer.singleShot(0, lambda t=self._motion_guard_token: self._restore_default_motion(t))
 
     def _clear_motion_if_current(self, token: int):
         if token != self._motion_guard_token:
             return
-        model = self._live2d_widget.model
-        if model is not None:
-            model.ClearMotions()
         self._motion_guard_token += 1
-        if model is not None:
-            QTimer.singleShot(0, self._start_idle_motion)
+        QTimer.singleShot(0, lambda t=self._motion_guard_token: self._restore_default_motion(t))
+
+    def _restore_default_motion(self, token: int):
+        if token != self._motion_guard_token:
+            return
+        model = self._live2d_widget.model
+        if model is None:
+            return
+        try:
+            model.ClearMotions()
+        except Exception:
+            pass
+        self._start_idle_motion()
 
     def _start_idle_motion(self):
         model = self._live2d_widget.model
