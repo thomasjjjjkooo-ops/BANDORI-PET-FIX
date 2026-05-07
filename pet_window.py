@@ -241,6 +241,7 @@ class PetWindow(QWidget):
         path = self._model_manager.get_model_json_path(character, costume)
         if not path:
             return
+        self._close_chat_process()
         self._current_char = character
         self._current_costume = costume
         self._live2d_widget.set_model_path(path)
@@ -356,6 +357,15 @@ class PetWindow(QWidget):
         if self._chat_process is process:
             self._chat_process = None
         process.deleteLater()
+
+    def _close_chat_process(self):
+        if self._chat_process is None:
+            return
+        if self._chat_process.state() != QProcess.ProcessState.NotRunning:
+            self._chat_process.terminate()
+            if not self._chat_process.waitForFinished(1000):
+                self._chat_process.kill()
+        self._chat_process = None
 
     def _on_chat_action(self, action_name: str):
         model = self._live2d_widget.model
@@ -640,10 +650,7 @@ class PetWindow(QWidget):
 
     def _quit(self):
         QApplication.instance().removeEventFilter(self)
-        if self._chat_process is not None and self._chat_process.state() != QProcess.ProcessState.NotRunning:
-            self._chat_process.terminate()
-            if not self._chat_process.waitForFinished(1000):
-                self._chat_process.kill()
+        self._close_chat_process()
         if self._settings_process is not None and self._settings_process.state() != QProcess.ProcessState.NotRunning:
             self._settings_process.terminate()
             if not self._settings_process.waitForFinished(1000):

@@ -430,6 +430,7 @@ class ChatWindow(QWidget):
 
         from database_manager import DatabaseManager
         self._db = DatabaseManager()
+        self._db.delete_empty_conversations(self._character)
 
         self.setWindowTitle(_tr("ChatWindow.title", name=self._display_name))
         self.setMinimumSize(360, 520)
@@ -872,7 +873,7 @@ class ChatWindow(QWidget):
             self._conv_id = conversations[0]["id"]
             self._load_messages()
         else:
-            self._conv_id = self._db.create_conversation(self._character)
+            self._conv_id = None
         self._input.setFocus()
 
     def _set_busy(self, busy: bool):
@@ -927,13 +928,11 @@ class ChatWindow(QWidget):
         last = self._db.get_last_conversation(self._character)
         if last:
             self._conv_id = last["id"]
-        else:
-            self._conv_id = self._db.create_conversation(self._character)
         self._load_messages()
 
     def _new_conversation(self):
         self._clear_message_widgets()
-        self._conv_id = self._db.create_conversation(self._character)
+        self._conv_id = None
 
     def _load_messages(self):
         if self._conv_id is None:
@@ -983,8 +982,9 @@ class ChatWindow(QWidget):
         self._current_bubble = assist_bubble
         self._scroll_to_bottom()
 
-        if self._conv_id:
-            self._db.add_message(self._conv_id, "user", text)
+        if self._conv_id is None:
+            self._conv_id = self._db.create_conversation(self._character)
+        self._db.add_message(self._conv_id, "user", text)
 
         system_prompt = build_system_prompt(self._character)
         messages = [{"role": "system", "content": system_prompt}]

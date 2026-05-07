@@ -49,13 +49,17 @@ class DatabaseManager:
         if character:
             rows = self._conn.execute(
                 "SELECT id, character, title, created_at FROM conversations "
-                "WHERE character=? ORDER BY created_at DESC",
+                "WHERE character=? AND EXISTS ("
+                "SELECT 1 FROM messages WHERE messages.conversation_id=conversations.id"
+                ") ORDER BY created_at DESC",
                 (character,)
             ).fetchall()
         else:
             rows = self._conn.execute(
                 "SELECT id, character, title, created_at FROM conversations "
-                "ORDER BY created_at DESC"
+                "WHERE EXISTS ("
+                "SELECT 1 FROM messages WHERE messages.conversation_id=conversations.id"
+                ") ORDER BY created_at DESC"
             ).fetchall()
         return [
             {"id": r[0], "character": r[1], "title": r[2], "created_at": r[3]}
@@ -65,7 +69,9 @@ class DatabaseManager:
     def get_last_conversation(self, character: str) -> dict | None:
         row = self._conn.execute(
             "SELECT id, character, title, created_at FROM conversations "
-            "WHERE character=? ORDER BY created_at DESC LIMIT 1",
+            "WHERE character=? AND EXISTS ("
+            "SELECT 1 FROM messages WHERE messages.conversation_id=conversations.id"
+            ") ORDER BY created_at DESC LIMIT 1",
             (character,)
         ).fetchone()
         if row:
@@ -102,6 +108,22 @@ class DatabaseManager:
 
     def delete_conversation(self, conv_id: int):
         self._conn.execute("DELETE FROM conversations WHERE id=?", (conv_id,))
+        self._conn.commit()
+
+    def delete_empty_conversations(self, character: str = ""):
+        if character:
+            self._conn.execute(
+                "DELETE FROM conversations WHERE character=? AND NOT EXISTS ("
+                "SELECT 1 FROM messages WHERE messages.conversation_id=conversations.id"
+                ")",
+                (character,),
+            )
+        else:
+            self._conn.execute(
+                "DELETE FROM conversations WHERE NOT EXISTS ("
+                "SELECT 1 FROM messages WHERE messages.conversation_id=conversations.id"
+                ")"
+            )
         self._conn.commit()
 
     def close(self):
