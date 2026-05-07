@@ -42,6 +42,7 @@ def main():
     window.action_triggered.connect(window.emit_action_for_ipc)
     window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
     window.closed.connect(lambda: cfg.set("language", current_language()))
+    window.closed.connect(app.quit)
 
     window.show()
     window.position_next_to_pet(QRect(args.pet_x, args.pet_y, args.pet_w, args.pet_h))

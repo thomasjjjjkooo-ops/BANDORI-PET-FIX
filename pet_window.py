@@ -328,6 +328,7 @@ class PetWindow(QWidget):
         process.readyReadStandardOutput.connect(lambda p=process: self._read_chat_process_output(p))
         process.readyReadStandardError.connect(lambda p=process: self._read_chat_process_error(p))
         process.finished.connect(lambda *args, p=process: self._on_chat_process_finished(p))
+        process.errorOccurred.connect(lambda _error, p=process: self._on_chat_process_finished(p))
         self._chat_process = process
         process.start()
 
