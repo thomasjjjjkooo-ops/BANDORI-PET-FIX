@@ -30,10 +30,14 @@ class DatabaseManager:
                 conversation_id INTEGER NOT NULL,
                 role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system')),
                 content TEXT NOT NULL,
+                reasoning_content TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
                 FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
             )
         """)
+        columns = [r[1] for r in self._conn.execute("PRAGMA table_info(messages)").fetchall()]
+        if "reasoning_content" not in columns:
+            self._conn.execute("ALTER TABLE messages ADD COLUMN reasoning_content TEXT NOT NULL DEFAULT ''")
         self._conn.commit()
 
     def create_conversation(self, character: str, title: str = "") -> int:
@@ -85,24 +89,24 @@ class DatabaseManager:
         )
         self._conn.commit()
 
-    def add_message(self, conversation_id: int, role: str, content: str) -> int:
+    def add_message(self, conversation_id: int, role: str, content: str, reasoning_content: str = "") -> int:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cur = self._conn.execute(
-            "INSERT INTO messages (conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)",
-            (conversation_id, role, content, now)
+            "INSERT INTO messages (conversation_id, role, content, reasoning_content, created_at) VALUES (?, ?, ?, ?, ?)",
+            (conversation_id, role, content, reasoning_content, now)
         )
         self._conn.commit()
         return cur.lastrowid
 
     def get_messages(self, conversation_id: int) -> list[dict]:
         rows = self._conn.execute(
-            "SELECT id, conversation_id, role, content, created_at FROM messages "
+            "SELECT id, conversation_id, role, content, reasoning_content, created_at FROM messages "
             "WHERE conversation_id=? ORDER BY id ASC",
             (conversation_id,)
         ).fetchall()
         return [
             {"id": r[0], "conversation_id": r[1], "role": r[2],
-             "content": r[3], "created_at": r[4]}
+             "content": r[3], "reasoning_content": r[4], "created_at": r[5]}
             for r in rows
         ]
 

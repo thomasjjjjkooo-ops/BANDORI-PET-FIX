@@ -947,6 +947,16 @@ class SettingsWindow(QWidget):
         self._llm_enable_thinking.setCurrentIndex(0)
         layout.addWidget(self._llm_enable_thinking)
 
+        show_reasoning_row = QHBoxLayout()
+        show_reasoning_row.setContentsMargins(0, 0, 0, 0)
+        show_reasoning_label = BodyLabel(_tr("SettingsWindow.llm_show_reasoning"), page)
+        self._llm_show_reasoning = SwitchButton(page)
+        self._llm_show_reasoning.setChecked(True)
+        show_reasoning_row.addWidget(show_reasoning_label)
+        show_reasoning_row.addStretch()
+        show_reasoning_row.addWidget(self._llm_show_reasoning)
+        layout.addLayout(show_reasoning_row)
+
         self._llm_model_combo_label = BodyLabel(_tr("SettingsWindow.llm_available_models"), page)
         self._llm_model_combo_label.hide()
         layout.addWidget(self._llm_model_combo_label)
@@ -1178,6 +1188,7 @@ class SettingsWindow(QWidget):
                 self._llm_enable_thinking.setCurrentIndex(2)
             else:
                 self._llm_enable_thinking.setCurrentIndex(0)
+            self._llm_show_reasoning.setChecked(bool(self._cfg.get("llm_show_reasoning", True)))
             mode = self._cfg.get("pov_mode", "off")
             for i in range(self._pov_mode.count()):
                 if self._pov_mode.itemData(i) == mode:
@@ -1232,6 +1243,7 @@ class SettingsWindow(QWidget):
                 self._cfg.set("llm_enable_thinking", False)
             else:
                 self._cfg.set("llm_enable_thinking", None)
+            self._cfg.set("llm_show_reasoning", self._llm_show_reasoning.isChecked())
             try:
                 self._cfg.save()
                 InfoBar.success(

@@ -444,8 +444,8 @@ def build_system_prompt(character: str, config_manager=None) -> str:
 
 
 class LLMStreamWorker(QThread):
-    chunk_received = Signal(str)
-    finished = Signal(str, list)
+    chunk_received = Signal(str, str)
+    finished = Signal(str, str, list)
     error = Signal(str)
 
     def __init__(self, api_url: str, api_key: str, model_id: str,
@@ -458,6 +458,7 @@ class LLMStreamWorker(QThread):
         self._enable_thinking = enable_thinking
         self._cancelled = False
         self._full_text = ""
+        self._reasoning_text = ""
 
     def cancel(self):
         self._cancelled = True
@@ -469,8 +470,7 @@ class LLMStreamWorker(QThread):
                 "messages": self._messages,
                 "stream": True,
             }
-            if self._enable_thinking is not None:
-                body["enable_thinking"] = self._enable_thinking
+            _apply_thinking_options(body, self._enable_thinking)
             data = json.dumps(body).encode("utf-8")
 
             headers = {
@@ -492,7 +492,11 @@ class LLMStreamWorker(QThread):
                         line, buffer = buffer.split(b"\n", 1)
                         self._process_line(line.decode("utf-8", errors="replace"))
 
-            self.finished.emit(self._full_text, [])
+            content, reasoning = split_thinking_text(
+                self._full_text,
+                self._reasoning_text,
+            )
+            self.finished.emit(content, reasoning, [])
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="replace")
             try:
@@ -514,16 +518,20 @@ class LLMStreamWorker(QThread):
         try:
             data = json.loads(data_str)
             delta = data.get("choices", [{}])[0].get("delta", {})
+            reasoning = _extract_reasoning(delta)
+            if reasoning:
+                self._reasoning_text += reasoning
+                self.chunk_received.emit("", reasoning)
             content = delta.get("content", "")
             if content:
                 self._full_text += content
-                self.chunk_received.emit(content)
+                self.chunk_received.emit(content, "")
         except (json.JSONDecodeError, KeyError, IndexError):
             pass
 
 
 class NonStreamWorker(QThread):
-    finished = Signal(str, list)
+    finished = Signal(str, str, list)
     error = Signal(str)
 
     def __init__(self, api_url: str, api_key: str, model_id: str,
@@ -542,8 +550,7 @@ class NonStreamWorker(QThread):
                 "messages": self._messages,
                 "stream": False,
             }
-            if self._enable_thinking is not None:
-                body["enable_thinking"] = self._enable_thinking
+            _apply_thinking_options(body, self._enable_thinking)
             data = json.dumps(body).encode("utf-8")
 
             headers = {
@@ -557,8 +564,14 @@ class NonStreamWorker(QThread):
 
             with urllib.request.urlopen(req, timeout=120) as resp:
                 resp_data = json.loads(resp.read().decode("utf-8"))
-                content = resp_data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                self.finished.emit(content, [])
+                message = resp_data.get("choices", [{}])[0].get("message", {})
+                content = message.get("content", "")
+                reasoning = _extract_reasoning(message)
+                content, reasoning = split_thinking_text(
+                    content,
+                    reasoning,
+                )
+                self.finished.emit(content, reasoning, [])
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="replace")
             try:
@@ -595,3 +608,38 @@ def parse_action_tags(text: str) -> list[str]:
 def strip_action_tags(text: str) -> str:
     text = text.replace("[DONE]", "")
     return ACTION_PATTERN.sub("", text).strip()
+
+
+def _extract_reasoning(data: dict) -> str:
+    for key in ("reasoning_content", "reasoning", "thinking"):
+        value = data.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+_THINK_PATTERN = re.compile(r"<think(?:ing)?>\s*(.*?)\s*</think(?:ing)?>", re.IGNORECASE | re.DOTALL)
+
+
+def _apply_thinking_options(body: dict, enable_thinking):
+    if enable_thinking is None:
+        return
+    body["enable_thinking"] = enable_thinking
+    body["thinking"] = {"type": "enabled" if enable_thinking else "disabled"}
+    if enable_thinking:
+        body["reasoning_effort"] = "medium"
+
+
+def split_thinking_text(content: str, reasoning: str = "") -> tuple[str, str]:
+    if not content:
+        return "", reasoning.strip()
+    collected = [reasoning.strip()] if reasoning and reasoning.strip() else []
+
+    def collect(match):
+        text = match.group(1).strip()
+        if text:
+            collected.append(text)
+        return ""
+
+    clean = _THINK_PATTERN.sub(collect, content).strip()
+    return clean, "\n\n".join(collected).strip()

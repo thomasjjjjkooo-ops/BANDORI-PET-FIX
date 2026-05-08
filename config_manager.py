@@ -26,6 +26,7 @@ DEFAULTS = {
     "pov_custom_prompt": "",
     "pov_role_character": "",
     "llm_enable_thinking": None,
+    "llm_show_reasoning": True,
 }
 
 

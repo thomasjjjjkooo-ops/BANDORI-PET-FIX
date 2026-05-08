@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTextEdit, QScrollArea, QSizePolicy, QToolButton, QMenu,
     QApplication, QGraphicsOpacityEffect, QWidgetAction,
-    QGraphicsColorizeEffect,
+    QGraphicsColorizeEffect, QFrame,
 )
 
 from i18n_manager import tr as _tr
@@ -252,10 +252,12 @@ class ConversationHistoryRow(QWidget):
 
 
 class MessageBubble(QWidget):
-    def __init__(self, text: str, role: str, author: str = "", created_at: str = "", parent=None, avatar_color: str = ""):
+    def __init__(self, text: str, role: str, author: str = "", created_at: str = "", parent=None, avatar_color: str = "", reasoning: str = "", show_reasoning: bool = True):
         super().__init__(parent)
         self._text = text
         self._role = role
+        self._reasoning = reasoning
+        self._show_reasoning = show_reasoning
         self._author = author or (_tr("ChatWindow.you") if role == "user" else _tr("ChatWindow.you"))
         self._created_at = created_at
         self._avatar_color = avatar_color
@@ -292,6 +294,35 @@ class MessageBubble(QWidget):
         font.setPointSize(10)
         self._label.setFont(font)
 
+        self._reasoning_panel = RoundedPanel(self)
+        self._reasoning_panel.setVisible(self._should_show_reasoning())
+        reasoning_layout = QHBoxLayout(self._reasoning_panel)
+        reasoning_layout.setContentsMargins(8, 7, 9, 7)
+        reasoning_layout.setSpacing(8)
+
+        self._reasoning_bar = QFrame(self._reasoning_panel)
+        self._reasoning_bar.setFixedWidth(3)
+        reasoning_layout.addWidget(self._reasoning_bar)
+
+        reasoning_stack = QVBoxLayout()
+        reasoning_stack.setContentsMargins(0, 0, 0, 0)
+        reasoning_stack.setSpacing(3)
+        self._reasoning_title = QLabel(_tr("ChatWindow.reasoning_title"), self._reasoning_panel)
+        title_font = QFont()
+        title_font.setPointSize(8)
+        title_font.setBold(True)
+        self._reasoning_title.setFont(title_font)
+        self._reasoning_label = QLabel(self._reasoning, self._reasoning_panel)
+        self._reasoning_label.setWordWrap(True)
+        self._reasoning_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._reasoning_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        reasoning_font = QFont()
+        reasoning_font.setPointSize(9)
+        self._reasoning_label.setFont(reasoning_font)
+        reasoning_stack.addWidget(self._reasoning_title)
+        reasoning_stack.addWidget(self._reasoning_label)
+        reasoning_layout.addLayout(reasoning_stack, 1)
+
         self._stream_label = QLabel("", self)
         stream_font = QFont()
         stream_font.setPointSize(8)
@@ -302,6 +333,7 @@ class MessageBubble(QWidget):
         bubble_layout = QVBoxLayout(self._container)
         bubble_layout.setContentsMargins(12, 9, 12, 9)
         bubble_layout.setSpacing(4)
+        bubble_layout.addWidget(self._reasoning_panel)
         bubble_layout.addWidget(self._label)
         bubble_layout.addWidget(self._stream_label)
 
@@ -367,12 +399,20 @@ class MessageBubble(QWidget):
         text = "#f7f7fb" if dark else "#1f2328"
         meta = "#a9b0c3" if dark else "#657089"
         stream = "#82cfff" if dark else "#5470c6"
+        reasoning_bg = "#22283a" if dark else "#f1f5ff"
+        reasoning_border = "#31394e" if dark else "#d9e3f6"
+        reasoning_text = "#cbd3e8" if dark else "#4e5b75"
+        reasoning_title = "#aeb8d7" if dark else "#5667a7"
         avatar_bg = self._avatar_color if user and self._avatar_color else _TELEGRAM_ACCENT if user else _TEAMS_ACCENT
         avatar_text = "#ffffff"
         self._label.setStyleSheet(f"color: {text}; background: transparent;")
         self._meta.setAlignment(Qt.AlignmentFlag.AlignRight if user else Qt.AlignmentFlag.AlignLeft)
         self._meta.setStyleSheet(f"color: {meta}; background: transparent; padding: 0 2px;")
         self._stream_label.setStyleSheet(f"color: {stream}; background: transparent;")
+        self._reasoning_title.setStyleSheet(f"color: {reasoning_title}; background: transparent;")
+        self._reasoning_label.setStyleSheet(f"color: {reasoning_text}; background: transparent;")
+        self._reasoning_bar.setStyleSheet(f"background: {_TEAMS_ACCENT}; border-radius: 1px;")
+        self._reasoning_panel.set_panel_style(reasoning_bg, reasoning_border, 9, 1)
         self._avatar.setStyleSheet(f"""
             QLabel {{
                 background: {avatar_bg};
@@ -386,6 +426,14 @@ class MessageBubble(QWidget):
 
     def set_text(self, text: str):
         self._label.setText(text)
+
+    def set_reasoning(self, reasoning: str):
+        self._reasoning = reasoning.strip()
+        self._reasoning_label.setText(self._reasoning)
+        self._reasoning_panel.setVisible(self._should_show_reasoning())
+
+    def _should_show_reasoning(self) -> bool:
+        return self._show_reasoning and bool(self._reasoning) and self._role != "user"
 
     def set_streaming(self, streaming: bool):
         self._streaming = streaming
@@ -417,6 +465,7 @@ class ChatWindow(QWidget):
         self._seen_actions: set[str] = set()
         self._stream_buffer = ""
         self._visible_stream_text = ""
+        self._reasoning_stream_text = ""
         self._pending_actions.clear()
         self._seen_actions.clear()
         self._stream_flush_timer = QTimer(self)
@@ -430,6 +479,7 @@ class ChatWindow(QWidget):
         self._display_name = model_manager.get_display_name(character)
         self._user_name = self._cfg.get("user_name", "").strip() if self._cfg else ""
         self._user_avatar_color = self._cfg.get("user_avatar_color", _TELEGRAM_ACCENT) if self._cfg else _TELEGRAM_ACCENT
+        self._show_reasoning = bool(self._cfg.get("llm_show_reasoning", True)) if self._cfg else True
 
         from database_manager import DatabaseManager
         self._db = DatabaseManager()
@@ -905,6 +955,7 @@ class ChatWindow(QWidget):
         self._stream_flush_timer.stop()
         self._stream_buffer = ""
         self._visible_stream_text = ""
+        self._reasoning_stream_text = ""
         self._current_bubble = None
         self._conv_id = conv_id
         self._clear_message_widgets()
@@ -924,6 +975,7 @@ class ChatWindow(QWidget):
         self._stream_flush_timer.stop()
         self._stream_buffer = ""
         self._visible_stream_text = ""
+        self._reasoning_stream_text = ""
         self._current_bubble = None
         self._clear_message_widgets()
         if conversations:
@@ -1001,7 +1053,15 @@ class ChatWindow(QWidget):
         for m in messages:
             author = self._user_name if m["role"] == "user" and self._user_name else _tr("ChatWindow.you") if m["role"] == "user" else self._display_name
             avatar = self._user_avatar_color if m["role"] == "user" else ""
-            bubble = MessageBubble(m["content"], m["role"], author, m.get("created_at", ""), avatar_color=avatar)
+            bubble = MessageBubble(
+                m["content"],
+                m["role"],
+                author,
+                m.get("created_at", ""),
+                avatar_color=avatar,
+                reasoning=m.get("reasoning_content", ""),
+                show_reasoning=self._show_reasoning,
+            )
             self._msg_layout.addWidget(bubble)
         self._msg_layout.addStretch()
         QTimer.singleShot(50, self._scroll_to_bottom)
@@ -1029,11 +1089,18 @@ class ChatWindow(QWidget):
         self._set_busy(True)
         self._stream_buffer = ""
         self._visible_stream_text = ""
+        self._reasoning_stream_text = ""
 
-        user_bubble = MessageBubble(text, "user", self._user_name or _tr("ChatWindow.you"), avatar_color=self._user_avatar_color)
+        user_bubble = MessageBubble(
+            text,
+            "user",
+            self._user_name or _tr("ChatWindow.you"),
+            avatar_color=self._user_avatar_color,
+            show_reasoning=self._show_reasoning,
+        )
         self._msg_layout.insertWidget(self._msg_layout.count() - 1, user_bubble)
 
-        assist_bubble = MessageBubble("", "assistant", self._display_name)
+        assist_bubble = MessageBubble("", "assistant", self._display_name, show_reasoning=self._show_reasoning)
         assist_bubble.set_streaming(True)
         self._msg_layout.insertWidget(self._msg_layout.count() - 1, assist_bubble)
         self._current_bubble = assist_bubble
@@ -1074,7 +1141,14 @@ class ChatWindow(QWidget):
 
         self._worker.start()
 
-    def _on_chunk_received(self, text: str):
+    def _on_chunk_received(self, text: str, reasoning: str):
+        if reasoning:
+            self._reasoning_stream_text += reasoning
+            if self._current_bubble:
+                self._current_bubble.set_reasoning(self._reasoning_stream_text)
+                self._current_bubble.set_streaming(True)
+                self._scroll_to_bottom()
+
         clean = strip_action_tags(text)
         if clean:
             self._stream_buffer += clean
@@ -1098,20 +1172,23 @@ class ChatWindow(QWidget):
         self._current_bubble.set_text(self._visible_stream_text)
         self._scroll_to_bottom()
 
-    def _on_response_finished(self, full_text: str, actions: list):
+    def _on_response_finished(self, full_text: str, reasoning_text: str, actions: list):
         self._pending_actions.extend(parse_action_tags(full_text))
         self._flush_actions()
 
         clean = strip_action_tags(full_text)
+        reasoning_clean = strip_action_tags(reasoning_text)
         if self._current_bubble:
             self._stream_flush_timer.stop()
             self._stream_buffer = ""
             self._visible_stream_text = clean
+            self._reasoning_stream_text = reasoning_clean
             self._current_bubble.set_streaming(False)
+            self._current_bubble.set_reasoning(reasoning_clean)
             self._current_bubble.set_text(clean)
 
         if self._conv_id:
-            self._db.add_message(self._conv_id, "assistant", clean)
+            self._db.add_message(self._conv_id, "assistant", clean, reasoning_clean)
 
         self._set_busy(False)
         self._input.setFocus()
@@ -1120,21 +1197,24 @@ class ChatWindow(QWidget):
         self._current_bubble = None
         self._scroll_to_bottom()
 
-    def _on_response_finished_nonstream(self, full_text: str, actions: list):
+    def _on_response_finished_nonstream(self, full_text: str, reasoning_text: str, actions: list):
         acts = parse_action_tags(full_text)
         self._pending_actions.extend(acts)
         self._flush_actions()
 
         clean = strip_action_tags(full_text)
+        reasoning_clean = strip_action_tags(reasoning_text)
         if self._current_bubble:
             self._stream_flush_timer.stop()
             self._stream_buffer = ""
             self._visible_stream_text = clean
+            self._reasoning_stream_text = reasoning_clean
             self._current_bubble.set_streaming(False)
+            self._current_bubble.set_reasoning(reasoning_clean)
             self._current_bubble.set_text(clean)
 
         if self._conv_id:
-            self._db.add_message(self._conv_id, "assistant", clean)
+            self._db.add_message(self._conv_id, "assistant", clean, reasoning_clean)
 
         self._set_busy(False)
         self._input.setFocus()
