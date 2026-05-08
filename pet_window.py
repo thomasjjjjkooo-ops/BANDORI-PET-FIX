@@ -5,7 +5,7 @@ import random
 import re
 
 from PySide6.QtCore import Qt, QPoint, QTimer, QPropertyAnimation, QEasingCurve, QProcess, QEvent
-from PySide6.QtGui import QColor, QIcon, QCursor
+from PySide6.QtGui import QColor, QIcon, QCursor, QMoveEvent, QResizeEvent
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QApplication, QSystemTrayIcon, QMenu, QStackedLayout,
     QGraphicsOpacityEffect,
@@ -16,6 +16,7 @@ from qfluentwidgets import (
 )
 
 from i18n_manager import tr as _tr
+from action_bus import consume_actions
 from live2d_widget import Live2DWidget
 from model_manager import ModelManager
 from pixel_pet_widget import PixelPetWidget, load_pixel_frames, pixel_path_for_character
@@ -60,7 +61,7 @@ else:
 class PetWindow(QWidget):
     def __init__(self, live2d_module, model_manager=None,
                  character="", costume="", fps=120, opacity=1.0,
-                 config_manager=None):
+                 config_manager=None, enable_tray=True):
         super().__init__()
         self._live2d = live2d_module
         self._model_manager = model_manager or ModelManager()
@@ -70,6 +71,7 @@ class PetWindow(QWidget):
         self._opacity = opacity
         self._vsync = True
         self._tray_icon = None
+        self._enable_tray = enable_tray
         self._cfg = config_manager
         self._radial_menu = None
         self._chat_process = None
@@ -83,11 +85,21 @@ class PetWindow(QWidget):
         self._passthrough_timer = QTimer(self)
         self._passthrough_timer.setInterval(50)
         self._passthrough_timer.timeout.connect(self._update_mouse_passthrough)
+        self._action_bus_seen: set[str] = set()
+        self._action_bus_timer = QTimer(self)
+        self._action_bus_timer.setInterval(120)
+        self._action_bus_timer.timeout.connect(self._poll_action_bus)
+        self._position_save_timer = QTimer(self)
+        self._position_save_timer.setSingleShot(True)
+        self._position_save_timer.setInterval(250)
+        self._position_save_timer.timeout.connect(self._save_config)
 
         self._init_ui()
-        self._init_tray()
+        if self._enable_tray:
+            self._init_tray()
         self._load_initial_model()
         self._passthrough_timer.start()
+        self._action_bus_timer.start()
         QApplication.instance().installEventFilter(self)
 
         self.setWindowOpacity(self._opacity)
@@ -204,6 +216,23 @@ class PetWindow(QWidget):
         self._vsync = enabled
         self._live2d_widget.set_vsync(enabled)
 
+    def moveEvent(self, event: QMoveEvent):
+        super().moveEvent(event)
+        self._schedule_position_save()
+
+    def resizeEvent(self, event: QResizeEvent):
+        super().resizeEvent(event)
+        self._schedule_position_save()
+
+    def closeEvent(self, event):
+        self._save_config()
+        super().closeEvent(event)
+
+    def _schedule_position_save(self):
+        if not self._cfg or not getattr(self, "_show_pos_set", False):
+            return
+        self._position_save_timer.start()
+
     def _init_tray(self):
         self._tray_icon = QSystemTrayIcon(self)
         icon_path = os.path.join(
@@ -270,6 +299,7 @@ class PetWindow(QWidget):
         self._current_char = character
         self._current_costume = costume
         self._live2d_widget.set_model_path(path)
+        self._sync_current_model_entry(path)
         if self._pixel_mode and not self._load_pixel_for_current_character():
             self._enable_live2d_mode(save=False)
         self._update_tooltip()
@@ -296,6 +326,8 @@ class PetWindow(QWidget):
         costume_name = self._model_manager.get_costume_display_name(
             self._current_char, self._current_costume
         )
+        if self._tray_icon is None:
+            return
         self._tray_icon.setToolTip(
             _tr("PetWindow.tray_tooltip_with_model", display=display, costume=costume_name)
         )
@@ -376,7 +408,16 @@ class PetWindow(QWidget):
         data = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
         for line in data.splitlines():
             if line.startswith("ACTION\t"):
-                self._on_chat_action(line.split("\t", 1)[1])
+                parts = line.split("\t", 2)
+                if len(parts) == 3:
+                    if parts[1] == self._current_char:
+                        self._on_chat_action(parts[2])
+                elif len(parts) == 2:
+                    self._on_chat_action(parts[1])
+
+    def _poll_action_bus(self):
+        for action in consume_actions(self._current_char, self._action_bus_seen):
+            self._on_chat_action(action)
 
     def _read_chat_process_error(self, process: QProcess):
         data = bytes(process.readAllStandardError()).decode("utf-8", errors="replace").strip()
@@ -798,6 +839,8 @@ class PetWindow(QWidget):
             self._cfg.set("language", current_language())
             self._cfg.set("character", self._current_char)
             self._cfg.set("costume", self._current_costume)
+            path = self._model_manager.get_model_json_path(self._current_char, self._current_costume)
+            self._sync_current_model_entry(path, save=False)
             self._cfg.set("fps", self._fps)
             self._cfg.set("opacity", self._opacity)
             self._cfg.set("dark_theme", isDarkTheme())
@@ -814,6 +857,40 @@ class PetWindow(QWidget):
                 self._cfg.set("window_height", self.height())
             self._cfg.save()
 
+    def _sync_current_model_entry(self, path: str, save: bool = True):
+        if not self._cfg or not path:
+            return
+        if save:
+            self._cfg.load()
+        models = self._cfg.get("models", [])
+        if not isinstance(models, list):
+            models = []
+        entry = {"character": self._current_char, "costume": self._current_costume, "path": path}
+        if self._pixel_mode:
+            entry.update({
+                "pixel_window_x": self.x(),
+                "pixel_window_y": self.y(),
+            })
+        else:
+            entry.update({
+                "window_x": self.x(),
+                "window_y": self.y(),
+                "window_width": self.width(),
+                "window_height": self.height(),
+            })
+        for idx, item in enumerate(models):
+            if isinstance(item, dict) and item.get("character") == self._current_char:
+                preserved = dict(item)
+                preserved.update(entry)
+                entry = preserved
+                models[idx] = entry
+                break
+        else:
+            models.append(entry)
+        self._cfg.set("models", models)
+        if save:
+            self._cfg.save()
+
     def _quit(self):
         QApplication.instance().removeEventFilter(self)
         self._close_chat_process()
@@ -821,7 +898,8 @@ class PetWindow(QWidget):
             self._settings_process.terminate()
             if not self._settings_process.waitForFinished(1000):
                 self._settings_process.kill()
-        self._tray_icon.hide()
+        if self._tray_icon is not None:
+            self._tray_icon.hide()
         QApplication.quit()
 
     def contextMenuEvent(self, event):

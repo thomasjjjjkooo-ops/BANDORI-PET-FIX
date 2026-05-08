@@ -38,7 +38,21 @@ def main():
 
     setTheme(Theme.DARK if cfg.get("dark_theme", False) else Theme.LIGHT)
 
-    window = ChatWindow(args.character, ModelManager(), None, cfg)
+    mgr = ModelManager()
+    models = cfg.get("models", [])
+    characters = []
+    seen = set()
+    if isinstance(models, list):
+        for item in models:
+            if isinstance(item, dict):
+                character = item.get("character", "")
+                if character and character not in seen and character in mgr.characters:
+                    characters.append(character)
+                    seen.add(character)
+    if args.character and args.character not in seen and args.character in mgr.characters:
+        characters.insert(0, args.character)
+
+    window = ChatWindow(args.character, mgr, None, cfg, group_characters=characters if len(characters) > 1 else None)
     window.action_triggered.connect(window.emit_action_for_ipc)
     window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
     window.closed.connect(lambda: cfg.set("language", current_language()))

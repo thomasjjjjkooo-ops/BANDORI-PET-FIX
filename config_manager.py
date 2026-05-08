@@ -7,6 +7,7 @@ CONFIG_PATH = BASE_DIR / "config.json"
 DEFAULTS = {
     "character": "",
     "costume": "",
+    "models": [],
     "language": "",
     "fps": 120,
     "opacity": 1.0,
@@ -23,6 +24,7 @@ DEFAULTS = {
     "llm_api_url": "",
     "llm_api_key": "",
     "llm_model_id": "",
+    "llm_aux_model_id": "",
     "user_name": "",
     "user_avatar_color": "#2aabee",
     "pov_mode": "off",

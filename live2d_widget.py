@@ -252,7 +252,10 @@ class Live2DWidget(QOpenGLWidget):
                 
                 g_pos = QCursor.pos()
                 gx, gy = g_pos.x(), g_pos.y()
-                
+                widget_pos = self.mapToGlobal(QPoint(0, 0))
+                self._cache_global_x = widget_pos.x()
+                self._cache_global_y = widget_pos.y()
+
                 if gx != self._last_cursor_x or gy != self._last_cursor_y:
                     self._last_cursor_x = gx
                     self._last_cursor_y = gy

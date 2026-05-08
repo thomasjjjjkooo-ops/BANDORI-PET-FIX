@@ -9,7 +9,8 @@ if LIVE2D_PACKAGE not in sys.path:
     sys.path.insert(0, LIVE2D_PACKAGE)
 
 from PySide6.QtCore import Qt, QProcess
-from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from qfluentwidgets import setTheme, Theme
 
@@ -46,32 +47,77 @@ def main():
     setTheme(theme)
 
     mgr = ModelManager()
-    pet_window_ref = {}
+    pet_window_ref = {"processes": []}
 
     char = cfg.get("character", "")
     costume = cfg.get("costume", "")
 
     from i18n_manager import current_language
 
+    tray_icon = None
+
+    def init_tray():
+        nonlocal tray_icon
+        tray_icon = QSystemTrayIcon(app)
+        icon_path = os.path.join(
+            BASE_DIR,
+            "third_party", "PyQt-Fluent-Widgets", "qfluentwidgets",
+            "_rc", "images", "logo.png"
+        )
+        tray_icon.setIcon(QIcon(icon_path) if os.path.exists(icon_path) else QIcon())
+        tray_icon.setToolTip("BandoriPet")
+
+        menu = QMenu()
+        settings_action = menu.addAction("设置")
+        settings_action.triggered.connect(lambda: launch_settings_process(show_launch=False))
+        exit_action = menu.addAction("退出")
+        exit_action.triggered.connect(quit_all)
+        tray_icon.setContextMenu(menu)
+        tray_icon.activated.connect(lambda reason: launch_settings_process(show_launch=False) if reason == QSystemTrayIcon.ActivationReason.Trigger else None)
+        tray_icon.show()
+
+    def quit_all():
+        close_pet_processes()
+        if tray_icon is not None:
+            tray_icon.hide()
+        app.quit()
+
+    def configured_models():
+        models = cfg.get("models", [])
+        result = []
+        seen = set()
+        if isinstance(models, list):
+            for item in models:
+                if not isinstance(item, dict):
+                    continue
+                model_char = item.get("character", "")
+                model_costume = item.get("costume", "")
+                if model_char in seen or model_char not in mgr.characters:
+                    continue
+                if not model_costume:
+                    model_costume = mgr.get_default_costume(model_char)
+                path = ModelManager.get_model_json_path(model_char, model_costume)
+                if not path:
+                    continue
+                entry = dict(item)
+                entry.update({"character": model_char, "costume": model_costume, "path": path})
+                result.append(entry)
+                seen.add(model_char)
+        if not result and char and costume and ModelManager.get_model_json_path(char, costume):
+            result.append({"character": char, "costume": costume, "path": ModelManager.get_model_json_path(char, costume)})
+        return result
+
     def save_config():
         cfg.set("language", current_language())
-        pw = pet_window_ref.get("window")
-        if pw:
-            cfg.set("character", pw._current_char)
-            cfg.set("costume", pw._current_costume)
-            cfg.set("fps", pw._fps)
-            cfg.set("opacity", pw._opacity)
-            cfg.set("dark_theme", isDarkTheme())
-            cfg.set("pet_mode", "pixel" if pw._pixel_mode else "live2d")
-            if pw._pixel_mode:
-                cfg.set("pixel_window_x", pw.x())
-                cfg.set("pixel_window_y", pw.y())
-            else:
-                cfg.set("window_x", pw.x())
-                cfg.set("window_y", pw.y())
-                cfg.set("window_width", pw.width())
-                cfg.set("window_height", pw.height())
         cfg.save()
+
+    def close_pet_processes():
+        for process in list(pet_window_ref.get("processes", [])):
+            if process.state() != QProcess.ProcessState.NotRunning:
+                process.terminate()
+                if not process.waitForFinished(1500):
+                    process.kill()
+        pet_window_ref["processes"] = []
 
     def on_model_selected(char, costume):
         pet_window_ref["char"] = char
@@ -84,39 +130,49 @@ def main():
         pet_window_ref["vsync"] = data.get("vsync", True)
 
     def launch_pet():
-        from pet_window import PetWindow
         if pet_window_ref.get("dark", False):
             setTheme(Theme.DARK)
-        pet = PetWindow(
-            live2d,
-            model_manager=mgr,
-            character=pet_window_ref.get("char", char),
-            costume=pet_window_ref.get("costume", costume),
-            fps=pet_window_ref.get("fps", cfg.get("fps", 120)),
-            opacity=pet_window_ref.get("opacity", cfg.get("opacity", 1.0)),
-            config_manager=cfg,
-        )
-        if pet._pixel_mode:
-            x = cfg.get("pixel_window_x", -1)
-            y = cfg.get("pixel_window_y", -1)
-            if x >= 0 and y >= 0:
-                pet.move(x, y)
-                pet._show_pos_set = True
-        else:
-            x = cfg.get("window_x", -1)
-            y = cfg.get("window_y", -1)
-            w = cfg.get("window_width", 400)
-            h = cfg.get("window_height", 500)
-            if x >= 0 and y >= 0:
-                pet.resize(w, h)
-                pet.move(x, y)
-                pet._show_pos_set = True
-        pet.show()
-        pet._live2d_widget.set_vsync(pet_window_ref.get("vsync", cfg.get("vsync", True)))
-        if cfg.get("drag_locked", False):
-            pet._live2d_widget.set_drag_locked(True)
-            pet._pixel_widget.set_drag_locked(True)
-        pet_window_ref["window"] = pet
+            cfg.set("dark_theme", True)
+        if "fps" in pet_window_ref:
+            cfg.set("fps", pet_window_ref["fps"])
+        if "opacity" in pet_window_ref:
+            cfg.set("opacity", pet_window_ref["opacity"])
+        if "vsync" in pet_window_ref:
+            cfg.set("vsync", pet_window_ref["vsync"])
+        cfg.save()
+        models = configured_models()
+        selected_char = pet_window_ref.get("char")
+        selected_costume = pet_window_ref.get("costume")
+        if selected_char and selected_costume and selected_char not in {m["character"] for m in models}:
+            path = ModelManager.get_model_json_path(selected_char, selected_costume)
+            if path:
+                models.append({"character": selected_char, "costume": selected_costume, "path": path})
+        pet_window_ref["processes"] = []
+        for idx, model in enumerate(models):
+            process = QProcess(app)
+            process.setProgram(sys.executable)
+            process.setArguments([
+                os.path.join(BASE_DIR, "pet_process.py"),
+                "--character", model["character"],
+                "--costume", model["costume"],
+                "--index", str(idx),
+            ])
+            process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
+            process.readyReadStandardError.connect(lambda p=process: read_pet_error(p))
+            process.finished.connect(lambda *args, p=process: clear_pet_process(p))
+            pet_window_ref["processes"].append(process)
+            process.start()
+
+    def read_pet_error(process):
+        data = bytes(process.readAllStandardError()).decode("utf-8", errors="replace").strip()
+        if data:
+            print(data)
+
+    def clear_pet_process(process):
+        processes = pet_window_ref.get("processes", [])
+        if process in processes:
+            processes.remove(process)
+        process.deleteLater()
 
     settings_process_ref = {}
 
@@ -147,6 +203,9 @@ def main():
         process.deleteLater()
 
     def launch_settings_process(show_launch=True):
+        existing = settings_process_ref.get("process")
+        if existing is not None and existing.state() != QProcess.ProcessState.NotRunning:
+            return
         script = os.path.join(BASE_DIR, "settings_process.py")
         process = QProcess(app)
         process.setProgram(sys.executable)
@@ -178,9 +237,12 @@ def main():
             char = mgr.characters[0]
             costume = mgr.get_default_costume(char)
 
-    app.aboutToQuit.connect(save_config)
+    init_tray()
 
-    if model_valid:
+    app.aboutToQuit.connect(save_config)
+    app.aboutToQuit.connect(close_pet_processes)
+
+    if configured_models() or model_valid:
         pet_window_ref["char"] = char
         pet_window_ref["costume"] = costume
         pet_window_ref["vsync"] = cfg.get("vsync", True)
@@ -189,7 +251,6 @@ def main():
         launch_settings_process(show_launch=True)
 
     ret = app.exec()
-    live2d.dispose()
     return ret
 
 

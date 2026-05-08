@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGridLayout,
     QPushButton, QSizePolicy, QSpacerItem, QScrollArea,
     QLineEdit, QGraphicsOpacityEffect, QGraphicsColorizeEffect, QApplication,
-    QTextEdit,
+    QTextEdit, QToolButton,
 )
 
 from qfluentwidgets import (
@@ -48,6 +48,97 @@ class FluentContextTextEdit(QTextEdit):
     def contextMenuEvent(self, event):
         menu = TextEditMenu(self)
         menu.exec(event.globalPos(), ani=True)
+
+
+class ModelListItem(QWidget):
+    selected = Signal(str)
+    remove_requested = Signal(str)
+
+    def __init__(self, character: str, title: str, subtitle: str, current: bool, parent=None):
+        super().__init__(parent)
+        self._character = character
+        self._current = current
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 6, 6, 6)
+        layout.setSpacing(6)
+
+        text_col = QVBoxLayout()
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(1)
+        self._title = BodyLabel(title, self)
+        self._subtitle = QLabel(subtitle, self)
+        text_col.addWidget(self._title)
+        text_col.addWidget(self._subtitle)
+        layout.addLayout(text_col, 1)
+
+        self._remove_btn = QToolButton(self)
+        self._remove_btn.setText("x")
+        self._remove_btn.setFixedSize(22, 22)
+        self._remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._remove_btn.clicked.connect(lambda: self.remove_requested.emit(self._character))
+        layout.addWidget(self._remove_btn)
+        self._apply_theme()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.selected.emit(self._character)
+        super().mousePressEvent(event)
+
+    def _apply_theme(self):
+        dark = isDarkTheme()
+        bg = "#263044" if self._current and dark else "#eef4ff" if self._current else "transparent"
+        hover = "#30384a" if dark else "#f1f6ff"
+        text = "#f7f7fb" if dark else "#1f2328"
+        muted = "#9aa5bd" if dark else "#657089"
+        danger = "#ff6b6b" if dark else "#c42b1c"
+        self.setStyleSheet(f"""
+            ModelListItem {{
+                background: {bg};
+                border-radius: 8px;
+            }}
+            ModelListItem:hover {{ background: {hover}; }}
+            QLabel {{ color: {muted}; font-size: 11px; }}
+            BodyLabel {{ color: {text}; font-size: 13px; }}
+            QToolButton {{
+                color: {danger};
+                background: transparent;
+                border: none;
+                border-radius: 11px;
+                font-weight: 700;
+            }}
+            QToolButton:hover {{ background: {'#4a2730' if dark else '#fde7e9'}; }}
+        """)
+
+
+class AddModelListItem(QPushButton):
+    add_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__("+ 添加 Live2D 模型", parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedHeight(38)
+        self.clicked.connect(self.add_requested.emit)
+        self._apply_theme()
+
+    def _apply_theme(self):
+        dark = isDarkTheme()
+        border = "#3f8cff" if dark else "#2aabee"
+        bg = "#182638" if dark else "#eef7ff"
+        hover = "#21344d" if dark else "#e2f1ff"
+        text = "#8fd3ff" if dark else "#0067b8"
+        self.setStyleSheet(f"""
+            QPushButton {{
+                color: {text};
+                background: {bg};
+                border: 1px dashed {border};
+                border-radius: 10px;
+                font-weight: 600;
+                text-align: center;
+            }}
+            QPushButton:hover {{ background: {hover}; }}
+        """)
 
 
 class RoleplayStatusDot(QWidget):
@@ -484,18 +575,24 @@ class SettingsWindow(QWidget):
         self._current_costume = current_costume
         self._fps = current_fps
         self._opacity = current_opacity
+        self._cfg = config_manager
         self._costume_buttons: list[CostumeItem] = []
         self._selection_cards: list[CardWidget] = []
         self._selected_costume = ""
+        self._configured_models = self._load_configured_models()
+        self._selected_list_character = self._configured_models[0]["character"] if self._configured_models else ""
+        if self._selected_list_character:
+            self._current_char = self._selected_list_character
+            self._current_costume = self._configured_models[0]["costume"]
         self._selected_band = model_manager.get_character_band(self._current_char)
         self._preview_bubble = None
         self._show_launch = show_launch
         self._start_on_costumes = start_on_costumes
         self._theme_widgets: list[QWidget] = []
-        self._cfg = config_manager
         self._pages: dict[str, QWidget] = {}
         self._nav_buttons: dict[str, NavButton] = {}
         self._current_page = "characters"
+        self._selecting_model = False
         self._vsync = vsync
         self._saved_user_name = ""
 
@@ -517,6 +614,7 @@ class SettingsWindow(QWidget):
         self._nav_buttons["characters"].setChecked(True)
 
         if self._start_on_costumes:
+            self._selecting_model = True
             self._populate_costumes(self._current_char)
             display = self._model_manager.get_display_name(self._current_char)
             self._costume_title.setText(_tr("SettingsWindow.costumes_title", display=display))
@@ -524,7 +622,37 @@ class SettingsWindow(QWidget):
             self._char_page.hide()
             self._costume_page.show()
         else:
-            self._populate_bands()
+            if self._selected_list_character:
+                self._show_model_detail()
+            else:
+                self._enter_model_selection()
+        self._refresh_model_list()
+
+    def _load_configured_models(self) -> list[dict]:
+        models = self._cfg.get("models", []) if self._cfg else []
+        result = []
+        seen = set()
+        if isinstance(models, list):
+            for item in models:
+                if not isinstance(item, dict):
+                    continue
+                character = item.get("character", "")
+                costume = item.get("costume", "")
+                if character in seen or character not in self._model_manager.characters:
+                    continue
+                if not costume:
+                    costume = self._model_manager.get_default_costume(character)
+                path = self._model_manager.get_model_json_path(character, costume)
+                if not path:
+                    continue
+                result.append({"character": character, "costume": costume, "path": path})
+                seen.add(character)
+        if self._current_char and self._current_char not in seen:
+            costume = self._current_costume or self._model_manager.get_default_costume(self._current_char)
+            path = self._model_manager.get_model_json_path(self._current_char, costume)
+            if path:
+                result.insert(0, {"character": self._current_char, "costume": costume, "path": path})
+        return result
 
     def _on_language_changed(self, index: int):
         lang = self._lang_combo.itemData(index)
@@ -727,7 +855,11 @@ class SettingsWindow(QWidget):
             page.setVisible(key == nav_key)
         self._costume_page.hide()
         if nav_key == "characters":
-            self._populate_bands()
+            self._selecting_model = False
+            if self._selected_list_character:
+                self._show_model_detail()
+            else:
+                self._enter_model_selection()
         self._current_page = nav_key
         self._animate_indicator(nav_key)
 
@@ -801,8 +933,153 @@ class SettingsWindow(QWidget):
         self._selection_back_btn.hide()
 
         scroll.setWidget(grid_widget)
+        self._selection_scroll = scroll
         layout.addWidget(scroll, 1)
+
+        self._model_detail_widget = self._make_theme_widget(QWidget(page))
+        detail_shell = QVBoxLayout(self._model_detail_widget)
+        detail_shell.setContentsMargins(0, 0, 0, 0)
+        detail_shell.setSpacing(0)
+        detail_shell.addStretch(1)
+
+        detail_center = QHBoxLayout()
+        detail_center.setContentsMargins(0, 0, 0, 0)
+        detail_center.setSpacing(28)
+        detail_center.addStretch(1)
+
+        self._detail_card = CardWidget(self._model_detail_widget)
+        self._detail_card.setFixedSize(420, 440)
+        card_layout = QVBoxLayout(self._detail_card)
+        card_layout.setContentsMargins(26, 24, 26, 24)
+        card_layout.setSpacing(12)
+
+        self._detail_image = QLabel(self._detail_card)
+        self._detail_image.setFixedSize(300, 285)
+        self._detail_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card_layout.addWidget(self._detail_image, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        self._detail_name = TitleLabel("", self._detail_card)
+        self._detail_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._detail_costume = SubtitleLabel("", self._detail_card)
+        self._detail_costume.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._detail_band = BodyLabel("", self._detail_card)
+        self._detail_band.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card_layout.addWidget(self._detail_name)
+        card_layout.addWidget(self._detail_costume)
+        card_layout.addWidget(self._detail_band)
+
+        action_col = QVBoxLayout()
+        action_col.setContentsMargins(0, 0, 0, 0)
+        action_col.setSpacing(14)
+        action_col.addStretch(1)
+        self._switch_model_btn = QPushButton("切换\n角色/服装", self._model_detail_widget)
+        self._switch_model_btn.setFixedSize(168, 168)
+        self._switch_model_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._switch_model_btn.clicked.connect(self._enter_model_selection)
+        action_col.addWidget(self._switch_model_btn, 0, Qt.AlignmentFlag.AlignHCenter)
+        hint = BodyLabel("选择新的角色或服装", self._model_detail_widget)
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        action_col.addWidget(hint)
+        action_col.addStretch(1)
+
+        detail_center.addWidget(self._detail_card, 0, Qt.AlignmentFlag.AlignCenter)
+        detail_center.addLayout(action_col)
+        detail_center.addStretch(1)
+        detail_shell.addLayout(detail_center)
+        detail_shell.addStretch(1)
+
+        self._detail_action_hint = hint
+        self._update_switch_button_style()
+        qconfig.themeChanged.connect(self._update_switch_button_style)
+
+        layout.addWidget(self._model_detail_widget, 1)
+        self._model_detail_widget.hide()
         return page
+
+    def _update_switch_button_style(self):
+        if not hasattr(self, "_switch_model_btn"):
+            return
+        dark = isDarkTheme()
+        card_bg = "#252525" if dark else "#ffffff"
+        card_border = "#3a3a3a" if dark else "#e5e7eb"
+        hint_color = "#a7b0bf" if dark else "#687385"
+        self._detail_card.setStyleSheet(f"""
+            CardWidget {{
+                background: {card_bg};
+                border: 1px solid {card_border};
+                border-radius: 18px;
+            }}
+        """)
+        self._detail_action_hint.setStyleSheet(f"color: {hint_color};")
+        self._switch_model_btn.setStyleSheet(f"""
+            QPushButton {{
+                color: #ffffff;
+                background: {'#0078d4' if not dark else '#4cc2ff'};
+                border: 1px solid {'#60cdff' if dark else '#60a5fa'};
+                border-radius: 84px;
+                font-size: 18px;
+                font-weight: 700;
+            }}
+            QPushButton:hover {{ background: {'#106ebe' if not dark else '#76d6ff'}; }}
+            QPushButton:pressed {{ background: {'#005a9e' if not dark else '#189cd8'}; }}
+        """)
+
+    def _show_model_detail(self):
+        item = self._selected_model_item()
+        if not item:
+            self._enter_model_selection()
+            return
+        self._selecting_model = False
+        self._clear_selection_cards()
+        self._selection_scroll.hide()
+        self._selection_grid_widget.hide()
+        self._selection_back_btn.hide()
+        self._selection_title.setText("Live2D 模型详情")
+        self._selection_subtitle.setText("从右侧列表选择已有模型，或点击切换按钮修改角色/服装。")
+        self._model_detail_widget.show()
+
+        character = item["character"]
+        costume = item["costume"]
+        self._current_char = character
+        self._current_costume = costume
+        self._selected_costume = costume
+        self._selected_band = self._model_manager.get_character_band(character)
+
+        display = self._model_manager.get_display_name(character)
+        costume_name = self._model_manager.get_costume_display_name(character, costume)
+        band_name = self._model_manager.get_band_display_name(self._selected_band) if self._selected_band else ""
+        self._detail_name.setText(display)
+        self._detail_costume.setText(f"服装：{costume_name}")
+        self._detail_band.setText(f"乐队：{band_name}" if band_name else "")
+
+        pixmap = QPixmap(self._model_manager.get_character_image_path(character))
+        if not pixmap.isNull():
+            self._detail_image.setPixmap(pixmap.scaled(
+                self._detail_image.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ))
+        else:
+            self._detail_image.setText(display)
+
+    def _selected_model_item(self):
+        for item in self._configured_models:
+            if item["character"] == self._selected_list_character:
+                return item
+        return None
+
+    def _enter_model_selection(self):
+        self._selecting_model = True
+        self._model_detail_widget.hide()
+        self._selection_scroll.show()
+        self._selection_grid_widget.show()
+        self._populate_bands()
+        self._char_page.show()
+        self._costume_page.hide()
+        self._current_page = "characters"
+        for key, btn in self._nav_buttons.items():
+            btn.setChecked(key == "characters")
+        self._animate_indicator("characters")
 
     def _clear_selection_cards(self):
         for card in self._selection_cards:
@@ -812,6 +1089,12 @@ class SettingsWindow(QWidget):
 
     def _populate_bands(self):
         self._clear_selection_cards()
+        if hasattr(self, "_model_detail_widget"):
+            self._model_detail_widget.hide()
+        if hasattr(self, "_selection_grid_widget"):
+            self._selection_grid_widget.show()
+        if hasattr(self, "_selection_scroll"):
+            self._selection_scroll.show()
         self._selected_band = ""
         self._selection_back_btn.hide()
         self._selection_title.setText(_tr("SettingsWindow.band_title"))
@@ -932,7 +1215,7 @@ class SettingsWindow(QWidget):
         self._llm_api_key.setFixedHeight(36)
         layout.addWidget(self._llm_api_key)
 
-        model_label = BodyLabel(_tr("SettingsWindow.llm_model_id"), page)
+        model_label = BodyLabel("主模型 ID", page)
         layout.addWidget(model_label)
 
         model_row = QHBoxLayout()
@@ -944,9 +1227,23 @@ class SettingsWindow(QWidget):
 
         fetch_btn = PushButton(FluentIcon.SYNC, _tr("SettingsWindow.llm_fetch"), page)
         fetch_btn.setFixedHeight(36)
-        fetch_btn.clicked.connect(self._fetch_models)
+        fetch_btn.clicked.connect(lambda: self._fetch_models(self._llm_model_id))
         model_row.addWidget(fetch_btn)
         layout.addLayout(model_row)
+
+        aux_model_label = BodyLabel("辅助模型 ID", page)
+        layout.addWidget(aux_model_label)
+        self._llm_aux_model_id = FluentContextLineEdit(page)
+        self._llm_aux_model_id.setPlaceholderText("用于群聊发言顺序和条数规划；留空则使用主模型")
+        self._llm_aux_model_id.setFixedHeight(36)
+        aux_model_row = QHBoxLayout()
+        aux_model_row.setSpacing(8)
+        aux_model_row.addWidget(self._llm_aux_model_id)
+        aux_fetch_btn = PushButton(FluentIcon.SYNC, _tr("SettingsWindow.llm_fetch"), page)
+        aux_fetch_btn.setFixedHeight(36)
+        aux_fetch_btn.clicked.connect(lambda: self._fetch_models(self._llm_aux_model_id))
+        aux_model_row.addWidget(aux_fetch_btn)
+        layout.addLayout(aux_model_row)
 
         thinking_label = BodyLabel(_tr("SettingsWindow.llm_enable_thinking"), page)
         layout.addWidget(thinking_label)
@@ -1140,6 +1437,7 @@ class SettingsWindow(QWidget):
         self._llm_api_url.setStyleSheet(style)
         self._llm_api_key.setStyleSheet(style)
         self._llm_model_id.setStyleSheet(style)
+        self._llm_aux_model_id.setStyleSheet(style)
         self._user_name.setStyleSheet(style)
         self._pov_custom_prompt.setStyleSheet(style)
         self._style_avatar_buttons()
@@ -1189,6 +1487,7 @@ class SettingsWindow(QWidget):
             self._llm_api_url.setText(self._cfg.get("llm_api_url", ""))
             self._llm_api_key.setText(self._cfg.get("llm_api_key", ""))
             self._llm_model_id.setText(self._cfg.get("llm_model_id", ""))
+            self._llm_aux_model_id.setText(self._cfg.get("llm_aux_model_id", ""))
             self._saved_user_name = self._cfg.get("user_name", "")
             self._user_name.setText(self._saved_user_name)
             saved_color = self._cfg.get("user_avatar_color", "#2aabee")
@@ -1235,6 +1534,7 @@ class SettingsWindow(QWidget):
             self._cfg.set("llm_api_url", self._llm_api_url.text().strip())
             self._cfg.set("llm_api_key", self._llm_api_key.text().strip())
             self._cfg.set("llm_model_id", self._llm_model_id.text().strip())
+            self._cfg.set("llm_aux_model_id", self._llm_aux_model_id.text().strip())
             pov_mode = self._pov_mode.itemData(self._pov_mode.currentIndex()) or "off"
             if pov_mode == "role":
                 user_name = self._pov_role_character.currentText().strip()
@@ -1312,7 +1612,8 @@ class SettingsWindow(QWidget):
             parent=self,
         )
 
-    def _fetch_models(self):
+    def _fetch_models(self, target_input=None):
+        self._llm_model_fetch_target = target_input or self._llm_model_id
         api_url = self._llm_api_url.text().strip()
         api_key = self._llm_api_key.text().strip()
 
@@ -1365,13 +1666,17 @@ class SettingsWindow(QWidget):
                     background: {'#3a3a5a' if dark else '#e8f0fe'};
                 }}
             """)
-            btn.clicked.connect(lambda checked, mn=model_name: self._llm_model_id.setText(mn))
+            btn.clicked.connect(lambda checked, mn=model_name: self._set_fetched_model_id(mn))
             self._llm_model_list_layout.addWidget(btn)
             QTimer.singleShot(idx * 30, lambda b=btn: self._animate_button_in(b))
         self._llm_model_list_layout.addStretch()
 
         self._llm_model_combo_label.show()
         self._llm_model_scroll.show()
+
+    def _set_fetched_model_id(self, model_name: str):
+        target = getattr(self, "_llm_model_fetch_target", self._llm_model_id)
+        target.setText(model_name)
 
     def _build_side_panel(self):
         panel = self._make_theme_widget(QWidget())
@@ -1460,9 +1765,95 @@ class SettingsWindow(QWidget):
         self._apply_btn.clicked.connect(self._on_apply)
         layout.addWidget(self._apply_btn)
 
+        list_title = StrongBodyLabel("Live2D 模型列表", panel)
+        layout.addWidget(list_title)
+        self._model_list_widget = QWidget(panel)
+        self._model_list_layout = QVBoxLayout(self._model_list_widget)
+        self._model_list_layout.setContentsMargins(0, 0, 0, 0)
+        self._model_list_layout.setSpacing(6)
+        layout.addWidget(self._model_list_widget)
+
         return panel
 
+    def _save_configured_models(self):
+        if not self._cfg:
+            return
+        self._cfg.set("models", [dict(item) for item in self._configured_models])
+        self._cfg.save()
+
+    def _refresh_model_list(self):
+        if not hasattr(self, "_model_list_layout"):
+            return
+        while self._model_list_layout.count():
+            item = self._model_list_layout.takeAt(0)
+            widget = item.widget() if item else None
+            if widget:
+                widget.deleteLater()
+            if item:
+                del item
+        for item in self._configured_models:
+            character = item["character"]
+            costume = item["costume"]
+            title = self._model_manager.get_display_name(character)
+            subtitle = self._model_manager.get_costume_display_name(character, costume)
+            row = ModelListItem(character, title, subtitle, character == self._selected_list_character, self._model_list_widget)
+            row.selected.connect(self._select_model_list_item)
+            row.remove_requested.connect(self._remove_model_list_item)
+            self._model_list_layout.addWidget(row)
+        add_row = AddModelListItem(self._model_list_widget)
+        add_row.add_requested.connect(self._add_model_from_list)
+        self._model_list_layout.addWidget(add_row)
+
+    def _select_model_list_item(self, character: str):
+        for item in self._configured_models:
+            if item["character"] == character:
+                self._selected_list_character = character
+                self._current_char = character
+                self._current_costume = item["costume"]
+                self._selected_costume = item["costume"]
+                self._selected_band = self._model_manager.get_character_band(character)
+                self._refresh_model_list()
+                self._show_model_detail()
+                return
+
+    def _add_model_from_list(self):
+        self._selected_list_character = ""
+        self._refresh_model_list()
+        self._enter_model_selection()
+
+    def _remove_model_list_item(self, character: str):
+        self._configured_models = [item for item in self._configured_models if item["character"] != character]
+        if self._selected_list_character == character:
+            if self._configured_models:
+                self._select_model_list_item(self._configured_models[0]["character"])
+            else:
+                self._selected_list_character = ""
+        self._save_configured_models()
+        self._refresh_model_list()
+        if self._selected_list_character:
+            self._show_model_detail()
+        else:
+            self._enter_model_selection()
+
+    def _upsert_configured_model(self, character: str, costume: str):
+        path = self._model_manager.get_model_json_path(character, costume)
+        if not path:
+            return
+        entry = {"character": character, "costume": costume, "path": path}
+        for idx, item in enumerate(self._configured_models):
+            if item["character"] == character:
+                self._configured_models[idx] = entry
+                break
+        else:
+            self._configured_models.append(entry)
+        self._selected_list_character = character
+        self._save_configured_models()
+        self._refresh_model_list()
+        if not self._selecting_model:
+            self._show_model_detail()
+
     def _on_char_selected(self, char_key: str):
+        self._selecting_model = True
         self._current_char = char_key
         self._selected_band = self._model_manager.get_character_band(char_key)
         self._populate_costumes(char_key)
@@ -1497,7 +1888,10 @@ class SettingsWindow(QWidget):
             self._costume_list.insertWidget(self._costume_list.count() - 1, btn)
 
         if self._costume_buttons:
-            default_id = self._model_manager.get_default_costume(char_key)
+            default_id = next(
+                (item["costume"] for item in self._configured_models if item["character"] == char_key),
+                self._model_manager.get_default_costume(char_key),
+            )
             for btn in self._costume_buttons:
                 if btn.costume_id == default_id:
                     btn.setChecked(True)
@@ -1509,6 +1903,12 @@ class SettingsWindow(QWidget):
             b.setChecked(False)
         btn.setChecked(True)
         self._selected_costume = costume_id
+        self._current_costume = costume_id
+        self._upsert_configured_model(self._current_char, costume_id)
+        self._selecting_model = False
+        self._costume_page.hide()
+        self._char_page.show()
+        self._show_model_detail()
 
     def _show_costume_preview(self, anchor: QWidget, costume_id: str):
         if not self._live2d:
@@ -1528,6 +1928,7 @@ class SettingsWindow(QWidget):
         self._costume_page.hide()
         self._char_page.show()
         self._current_page = "characters"
+        self._selecting_model = True
         band_id = self._selected_band or self._model_manager.get_character_band(self._current_char)
         if band_id:
             self._populate_characters(band_id)
@@ -1538,6 +1939,7 @@ class SettingsWindow(QWidget):
         self._animate_indicator("characters")
 
     def _go_back_to_bands(self):
+        self._selecting_model = True
         self._populate_bands()
 
     def _on_vsync_changed(self, checked: bool):
@@ -1550,6 +1952,10 @@ class SettingsWindow(QWidget):
             return
         self._launched = True
         self._save_llm_config()
+        selected = self._selected_model_item()
+        if selected:
+            self._current_char = selected["character"]
+            self._selected_costume = selected["costume"]
         if self._current_char and self._selected_costume:
             self.model_selected.emit(self._current_char, self._selected_costume)
         self.settings_changed.emit({

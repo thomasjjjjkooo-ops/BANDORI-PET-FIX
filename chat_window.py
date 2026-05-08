@@ -13,11 +13,14 @@ from qfluentwidgets.components.widgets.menu import TextEditMenu
 from qfluentwidgets.common.config import qconfig
 
 from datetime import datetime
+import json
+import re
 
 from llm_manager import (
     build_system_prompt, LLMStreamWorker, NonStreamWorker,
     parse_action_tags, strip_action_tags,
 )
+from action_bus import publish_action
 
 
 _BG_LIGHT = "#f5f7fb"
@@ -530,13 +533,16 @@ class MessageBubble(QWidget):
 
 
 class ChatWindow(QWidget):
-    action_triggered = Signal(str)
+    action_triggered = Signal(str, str)
     closed = Signal()
 
     def __init__(self, character: str, model_manager, live2d_module,
-                 config_manager, parent_pet=None):
+                 config_manager, parent_pet=None, group_characters=None):
         super().__init__()
         self._character = character
+        self._group_characters = group_characters or []
+        self._is_group_chat = len(self._group_characters) > 1
+        self._conversation_key = "__group__" if self._is_group_chat else character
         self._model_manager = model_manager
         self._live2d = live2d_module
         self._cfg = config_manager
@@ -545,6 +551,7 @@ class ChatWindow(QWidget):
         self._worker = None
         self._current_bubble: MessageBubble | None = None
         self._pending_actions: list[str] = []
+        self._pending_action_character = character
         self._seen_actions: set[str] = set()
         self._stream_buffer = ""
         self._visible_stream_text = ""
@@ -555,18 +562,22 @@ class ChatWindow(QWidget):
         self._stream_flush_timer.setInterval(28)
         self._stream_flush_timer.timeout.connect(self._flush_stream_text)
         self._composer_colors = {}
+        self._group_queue: list[str] = []
+        self._group_spoken: list[str] = []
+        self._group_plan_worker = None
+        self._active_response_character = character
         self._closing = False
         self._close_animating = False
         self._window_anim = None
 
-        self._display_name = model_manager.get_display_name(character)
+        self._display_name = "群聊" if self._is_group_chat else model_manager.get_display_name(character)
         self._user_name = self._cfg.get("user_name", "").strip() if self._cfg else ""
         self._user_avatar_color = self._cfg.get("user_avatar_color", _TELEGRAM_ACCENT) if self._cfg else _TELEGRAM_ACCENT
         self._show_reasoning = bool(self._cfg.get("llm_show_reasoning", True)) if self._cfg else True
 
         from database_manager import DatabaseManager
         self._db = DatabaseManager()
-        self._db.delete_empty_conversations(self._character)
+        self._db.delete_empty_conversations(self._conversation_key)
 
         self.setWindowTitle(_tr("ChatWindow.title", name=self._display_name))
         self.setMinimumSize(360, 520)
@@ -997,7 +1008,7 @@ class ChatWindow(QWidget):
         title.setEnabled(False)
         menu.addSeparator()
 
-        conversations = self._db.get_conversations(self._character)
+        conversations = self._db.get_conversations(self._conversation_key)
         if not conversations:
             empty = menu.addAction(_tr("ChatWindow.no_convs"))
             empty.setEnabled(False)
@@ -1054,7 +1065,7 @@ class ChatWindow(QWidget):
         if not was_current:
             return
 
-        conversations = self._db.get_conversations(self._character)
+        conversations = self._db.get_conversations(self._conversation_key)
         self._stream_flush_timer.stop()
         self._stream_buffer = ""
         self._visible_stream_text = ""
@@ -1072,7 +1083,8 @@ class ChatWindow(QWidget):
         self._input.setEnabled(not busy)
         self._send_btn.setEnabled(not busy)
         self._new_btn.setEnabled(not busy)
-        self._composer_hint.setText(_tr("ChatWindow.streaming_response") if busy else _tr("ChatWindow.ready"))
+        planning = busy and self._is_group_chat and self._worker is None
+        self._composer_hint.setText("正在规划群聊发言..." if planning else _tr("ChatWindow.streaming_response") if busy else _tr("ChatWindow.ready"))
         dot = _TEAMS_ACCENT if busy else _TELEGRAM_ACCENT
         self._status_dot.setStyleSheet(f"background: {dot}; border-radius: 3px;")
 
@@ -1117,7 +1129,7 @@ class ChatWindow(QWidget):
         self._input.setVerticalScrollBarPolicy(scrollbar_policy)
 
     def _load_or_create_conversation(self):
-        last = self._db.get_last_conversation(self._character)
+        last = self._db.get_last_conversation(self._conversation_key)
         if last:
             self._conv_id = last["id"]
         self._load_messages()
@@ -1134,10 +1146,10 @@ class ChatWindow(QWidget):
         if stretch:
             del stretch
         for m in messages:
-            author = self._user_name if m["role"] == "user" and self._user_name else _tr("ChatWindow.you") if m["role"] == "user" else self._display_name
+            author = self._user_name if m["role"] == "user" and self._user_name else _tr("ChatWindow.you") if m["role"] == "user" else self._message_author(m["content"])
             avatar = self._user_avatar_color if m["role"] == "user" else ""
             bubble = MessageBubble(
-                m["content"],
+                self._message_content(m["content"], m["role"]),
                 m["role"],
                 author,
                 m.get("created_at", ""),
@@ -1148,6 +1160,61 @@ class ChatWindow(QWidget):
             self._msg_layout.addWidget(bubble)
         self._msg_layout.addStretch()
         QTimer.singleShot(50, self._scroll_to_bottom)
+
+    def _message_author(self, content: str) -> str:
+        if self._is_group_chat:
+            first_line = content.splitlines()[0].strip() if content else ""
+            if first_line.startswith("【") and "】" in first_line:
+                return first_line[1:first_line.index("】")]
+            for character in self._group_characters:
+                display = self._model_manager.get_display_name(character)
+                if content.startswith(f"【{display}】"):
+                    return display
+        return self._display_name
+
+    def _message_content(self, content: str, role: str) -> str:
+        if role == "assistant" and self._is_group_chat:
+            lines = content.splitlines()
+            first_line = lines[0].strip() if lines else ""
+            if first_line.startswith("【") and "】" in first_line:
+                return "\n".join(lines[1:]).lstrip()
+            for character in self._group_characters:
+                display = self._model_manager.get_display_name(character)
+                prefix = f"【{display}】"
+                if content.startswith(prefix):
+                    return content[len(prefix):].lstrip()
+        return content
+
+    def _assistant_content(self, character: str, text: str) -> str:
+        if not self._is_group_chat:
+            return text
+        return f"【{self._model_manager.get_display_name(character)}】\n{text}"
+
+    def _group_system_prompt(self, character: str, spoken_names: list[str]) -> str:
+        prompt = build_system_prompt(character, self._cfg)
+        names = [self._model_manager.get_display_name(c) for c in self._group_characters]
+        prompt += "\n\n【群聊规则】\n这是一个多人群聊。当前群聊成员：" + "、".join(names) + "。"
+        prompt += "\n你只扮演自己，不要代替其他角色说话。回复时不要添加角色名前缀，程序会自动添加。"
+        if spoken_names:
+            prompt += "\n你是在" + "、".join(spoken_names) + "之后发言，请自然承接前面角色的内容。"
+        return prompt
+
+    def _build_messages_for_character(self, character: str, spoken_names: list[str]) -> list[dict]:
+        system_prompt = self._group_system_prompt(character, spoken_names) if self._is_group_chat else build_system_prompt(character, self._cfg)
+        messages = [{"role": "system", "content": system_prompt}]
+        if self._conv_id:
+            history = self._db.get_messages(self._conv_id)
+            max_history = 20
+            for m in history[-(max_history * 2):]:
+                messages.append({"role": m["role"], "content": m["content"]})
+        now = datetime.now()
+        time_str = now.strftime("%Y-%m-%d %I:%M %p")
+        time_suffix = f"\n\n【后置提示词】\n当前时间：{time_str}"
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i]["role"] == "user":
+                messages[i]["content"] += time_suffix
+                break
+        return messages
 
     def _send_message(self):
         text = self._input.toPlainText().strip()
@@ -1183,46 +1250,122 @@ class ChatWindow(QWidget):
         )
         self._msg_layout.insertWidget(self._msg_layout.count() - 1, user_bubble)
 
-        assist_bubble = MessageBubble("", "assistant", self._display_name, show_reasoning=self._show_reasoning)
-        assist_bubble.set_streaming(True)
-        self._msg_layout.insertWidget(self._msg_layout.count() - 1, assist_bubble)
-        self._current_bubble = assist_bubble
+        if self._conv_id is None:
+            self._conv_id = self._db.create_conversation(self._conversation_key)
+        self._db.add_message(self._conv_id, "user", text)
+        if self._is_group_chat:
+            self._group_spoken = []
+            self._start_group_plan(text)
+        else:
+            self._start_response_for_character(self._character, [])
+
+    def _start_group_plan(self, user_text: str):
+        api_url = self._cfg.get("llm_api_url", "")
+        api_key = self._cfg.get("llm_api_key", "")
+        aux_model_id = self._cfg.get("llm_aux_model_id", "").strip() or self._cfg.get("llm_model_id", "")
+        if not aux_model_id:
+            self._use_fallback_group_plan()
+            return
+        members = [
+            {"key": character, "name": self._model_manager.get_display_name(character)}
+            for character in self._group_characters
+        ]
+        recent = []
+        if self._conv_id:
+            for m in self._db.get_messages(self._conv_id)[-12:]:
+                recent.append({"role": m["role"], "content": m["content"]})
+        planner_prompt = (
+            "你是群聊发言调度器。根据用户最新发言、成员关系和最近上下文，决定接下来哪些角色发言以及发言条数。"
+            "输出必须是严格 JSON，格式：{\"speakers\":[\"角色key\",...]}。"
+            "speakers 长度 1 到 6。可以让同一角色连续或多次出现。"
+            "只允许使用给定成员 key，不要输出解释、Markdown 或多余文字。"
+        )
+        content = json.dumps({
+            "members": members,
+            "latest_user_message": user_text,
+            "recent_history": recent,
+        }, ensure_ascii=False)
+        messages = [
+            {"role": "system", "content": planner_prompt},
+            {"role": "user", "content": content},
+        ]
+        self._group_plan_worker = NonStreamWorker(api_url, api_key, aux_model_id, messages, self._cfg.get("llm_enable_thinking", None))
+        self._group_plan_worker.finished.connect(self._on_group_plan_finished)
+        self._group_plan_worker.error.connect(self._on_group_plan_error)
+        self._group_plan_worker.start()
+
+    def _on_group_plan_finished(self, full_text: str, reasoning_text: str, actions: list):
+        del reasoning_text, actions
+        self._group_plan_worker = None
+        self._group_queue = self._parse_group_plan(full_text)
+        if not self._group_queue:
+            self._use_fallback_group_plan()
+            return
+        self._start_next_group_response()
+
+    def _on_group_plan_error(self, error_msg: str):
+        del error_msg
+        self._group_plan_worker = None
+        self._use_fallback_group_plan()
+
+    def _parse_group_plan(self, text: str) -> list[str]:
+        allowed = set(self._group_characters)
+        try:
+            match = re.search(r"\{.*\}", text, re.S)
+            data = json.loads(match.group(0) if match else text)
+            speakers = data.get("speakers", [])
+        except Exception:
+            speakers = []
+        result = []
+        for speaker in speakers:
+            if speaker in allowed:
+                result.append(speaker)
+            elif isinstance(speaker, str):
+                for character in self._group_characters:
+                    if speaker == self._model_manager.get_display_name(character):
+                        result.append(character)
+                        break
+            if len(result) >= 6:
+                break
+        return result
+
+    def _use_fallback_group_plan(self):
+        self._group_queue = list(self._group_characters[:3])
+        self._start_next_group_response()
+
+    def _start_response_for_character(self, character: str, spoken_names: list[str]):
+        api_url = self._cfg.get("llm_api_url", "")
+        api_key = self._cfg.get("llm_api_key", "")
+        model_id = self._cfg.get("llm_model_id", "")
+        self._active_response_character = character
+        self._pending_action_character = character
+        self._current_bubble = MessageBubble("", "assistant", self._message_author(self._assistant_content(character, "")), show_reasoning=self._show_reasoning)
+        self._current_bubble.set_streaming(True)
+        self._msg_layout.insertWidget(self._msg_layout.count() - 1, self._current_bubble)
         self._scroll_to_bottom()
 
-        if self._conv_id is None:
-            self._conv_id = self._db.create_conversation(self._character)
-        self._db.add_message(self._conv_id, "user", text)
-
-        system_prompt = build_system_prompt(self._character, self._cfg)
-        messages = [{"role": "system", "content": system_prompt}]
-
-        if self._conv_id:
-            history = self._db.get_messages(self._conv_id)
-            max_history = 20
-            for m in history[-(max_history * 2):]:
-                messages.append({"role": m["role"], "content": m["content"]})
-
-        now = datetime.now()
-        time_str = now.strftime("%Y-%m-%d %I:%M %p")
-        time_suffix = f"\n\n【后置提示词】\n当前时间：{time_str}"
-        for i in range(len(messages) - 1, -1, -1):
-            if messages[i]["role"] == "user":
-                messages[i]["content"] += time_suffix
-                break
-
-        use_stream = True
+        messages = self._build_messages_for_character(character, spoken_names)
         enable_thinking = self._cfg.get("llm_enable_thinking", None)
-        if use_stream:
-            self._worker = LLMStreamWorker(api_url, api_key, model_id, messages, enable_thinking)
-            self._worker.chunk_received.connect(self._on_chunk_received)
-            self._worker.finished.connect(self._on_response_finished)
-            self._worker.error.connect(self._on_response_error)
-        else:
-            self._worker = NonStreamWorker(api_url, api_key, model_id, messages, enable_thinking)
-            self._worker.finished.connect(self._on_response_finished_nonstream)
-            self._worker.error.connect(self._on_response_error)
-
+        self._worker = LLMStreamWorker(api_url, api_key, model_id, messages, enable_thinking)
+        self._worker.chunk_received.connect(self._on_chunk_received)
+        self._worker.finished.connect(self._on_response_finished)
+        self._worker.error.connect(self._on_response_error)
         self._worker.start()
+
+    def _start_next_group_response(self):
+        if not self._group_queue:
+            self._set_busy(False)
+            self._input.setFocus()
+            self._sync_input_height()
+            self._worker = None
+            self._current_bubble = None
+            self._scroll_to_bottom()
+            return
+        character = self._group_queue.pop(0)
+        self._stream_buffer = ""
+        self._visible_stream_text = ""
+        self._reasoning_stream_text = ""
+        self._start_response_for_character(character, list(self._group_spoken))
 
     def _on_chunk_received(self, text: str, reasoning: str):
         if reasoning:
@@ -1256,6 +1399,7 @@ class ChatWindow(QWidget):
         self._scroll_to_bottom()
 
     def _on_response_finished(self, full_text: str, reasoning_text: str, actions: list):
+        self._pending_action_character = self._active_response_character
         self._pending_actions.extend(parse_action_tags(full_text))
         self._flush_actions()
 
@@ -1271,17 +1415,25 @@ class ChatWindow(QWidget):
             self._current_bubble.set_text(clean)
 
         if self._conv_id:
-            self._db.add_message(self._conv_id, "assistant", clean, reasoning_clean)
+            stored = self._assistant_content(self._active_response_character, clean)
+            self._db.add_message(self._conv_id, "assistant", stored, reasoning_clean)
 
-        self._set_busy(False)
-        self._input.setFocus()
-        self._sync_input_height()
-        self._worker = None
-        self._current_bubble = None
-        self._scroll_to_bottom()
+        if self._is_group_chat:
+            self._group_spoken.append(self._model_manager.get_display_name(self._active_response_character))
+            self._worker = None
+            self._current_bubble = None
+            self._start_next_group_response()
+        else:
+            self._set_busy(False)
+            self._input.setFocus()
+            self._sync_input_height()
+            self._worker = None
+            self._current_bubble = None
+            self._scroll_to_bottom()
 
     def _on_response_finished_nonstream(self, full_text: str, reasoning_text: str, actions: list):
         acts = parse_action_tags(full_text)
+        self._pending_action_character = self._active_response_character
         self._pending_actions.extend(acts)
         self._flush_actions()
 
@@ -1297,14 +1449,21 @@ class ChatWindow(QWidget):
             self._current_bubble.set_text(clean)
 
         if self._conv_id:
-            self._db.add_message(self._conv_id, "assistant", clean, reasoning_clean)
+            stored = self._assistant_content(self._active_response_character, clean)
+            self._db.add_message(self._conv_id, "assistant", stored, reasoning_clean)
 
-        self._set_busy(False)
-        self._input.setFocus()
-        self._sync_input_height()
-        self._worker = None
-        self._current_bubble = None
-        self._scroll_to_bottom()
+        if self._is_group_chat:
+            self._group_spoken.append(self._model_manager.get_display_name(self._active_response_character))
+            self._worker = None
+            self._current_bubble = None
+            self._start_next_group_response()
+        else:
+            self._set_busy(False)
+            self._input.setFocus()
+            self._sync_input_height()
+            self._worker = None
+            self._current_bubble = None
+            self._scroll_to_bottom()
 
     def _on_response_error(self, error_msg: str):
         if self._current_bubble:
@@ -1326,11 +1485,12 @@ class ChatWindow(QWidget):
             if key in self._seen_actions:
                 continue
             self._seen_actions.add(key)
-            self.action_triggered.emit(action)
+            self.action_triggered.emit(self._pending_action_character, action)
         self._pending_actions.clear()
 
-    def emit_action_for_ipc(self, action: str):
-        print(f"ACTION\t{action}", flush=True)
+    def emit_action_for_ipc(self, character: str, action: str):
+        publish_action(character, action)
+        print(f"ACTION\t{character}\t{action}", flush=True)
 
     def _scroll_to_bottom(self):
         sb = self._scroll.verticalScrollBar()
@@ -1367,6 +1527,9 @@ class ChatWindow(QWidget):
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait(2000)
+        if self._group_plan_worker and self._group_plan_worker.isRunning():
+            self._group_plan_worker.quit()
+            self._group_plan_worker.wait(2000)
         self._stream_flush_timer.stop()
         self._db.close()
         self.closed.emit()
