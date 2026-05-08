@@ -282,6 +282,45 @@ class ConversationHistoryRow(QWidget):
         self.delete_requested.emit(self._conv_id)
 
 
+class PlanDivider(QWidget):
+    def __init__(self, text: str, parent=None):
+        super().__init__(parent)
+        self._text = text
+        self.setFixedHeight(28)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._apply_theme()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        dark = isDarkTheme()
+        line_color = QColor("#505060" if dark else "#c8cdd4")
+        text_color = QColor("#9098a8" if dark else "#8890a0")
+
+        fm = painter.fontMetrics()
+        text_width = fm.horizontalAdvance(self._text) + 24
+        mid_y = self.height() // 2
+
+        painter.setPen(QPen(line_color, 1))
+        gap = 16
+        left_end = (self.width() - text_width) // 2 - gap
+        right_start = (self.width() + text_width) // 2 + gap
+        if left_end > 8:
+            painter.drawLine(8, mid_y, int(left_end), mid_y)
+        if right_start < self.width() - 8:
+            painter.drawLine(int(right_start), mid_y, self.width() - 8, mid_y)
+
+        painter.setPen(text_color)
+        font = painter.font()
+        font.setPointSize(8)
+        painter.setFont(font)
+        rect = QRectF(0, 0, self.width(), self.height())
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self._text)
+
+    def _apply_theme(self):
+        self.update()
+
+
 class MessageBubble(QWidget):
     def __init__(self, text: str, role: str, author: str = "", created_at: str = "", parent=None, avatar_color: str = "", reasoning: str = "", show_reasoning: bool = True):
         super().__init__(parent)
@@ -565,6 +604,7 @@ class ChatWindow(QWidget):
         self._group_queue: list[str] = []
         self._group_spoken: list[str] = []
         self._group_plan_worker = None
+        self._plan_divider = None
         self._active_response_character = character
         self._closing = False
         self._close_animating = False
@@ -1260,10 +1300,12 @@ class ChatWindow(QWidget):
             self._start_response_for_character(self._character, [])
 
     def _start_group_plan(self, user_text: str):
+        self._show_plan_divider()
         api_url = self._cfg.get("llm_api_url", "")
         api_key = self._cfg.get("llm_api_key", "")
         aux_model_id = self._cfg.get("llm_aux_model_id", "").strip() or self._cfg.get("llm_model_id", "")
         if not aux_model_id:
+            self._hide_plan_divider()
             self._use_fallback_group_plan()
             return
         members = [
@@ -1294,9 +1336,22 @@ class ChatWindow(QWidget):
         self._group_plan_worker.error.connect(self._on_group_plan_error)
         self._group_plan_worker.start()
 
+    def _show_plan_divider(self):
+        self._hide_plan_divider()
+        divider = PlanDivider("AI 调度中", self._msg_area)
+        self._msg_layout.insertWidget(self._msg_layout.count() - 1, divider)
+        self._plan_divider = divider
+        self._scroll_to_bottom()
+
+    def _hide_plan_divider(self):
+        if self._plan_divider is not None:
+            self._plan_divider.deleteLater()
+            self._plan_divider = None
+
     def _on_group_plan_finished(self, full_text: str, reasoning_text: str, actions: list):
         del reasoning_text, actions
         self._group_plan_worker = None
+        self._hide_plan_divider()
         self._group_queue = self._parse_group_plan(full_text)
         if not self._group_queue:
             self._use_fallback_group_plan()
@@ -1306,6 +1361,7 @@ class ChatWindow(QWidget):
     def _on_group_plan_error(self, error_msg: str):
         del error_msg
         self._group_plan_worker = None
+        self._hide_plan_divider()
         self._use_fallback_group_plan()
 
     def _parse_group_plan(self, text: str) -> list[str]:
