@@ -294,6 +294,9 @@ class MessageBubble(QWidget):
         self._typing_timer = QTimer(self)
         self._typing_timer.setInterval(420)
         self._typing_timer.timeout.connect(self._tick_typing)
+        self._text_opacity_effect = None
+        self._text_fade_anim = None
+        self._height_anim = None
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._init_ui()
         self.apply_theme()
@@ -453,12 +456,63 @@ class MessageBubble(QWidget):
         self._container.set_panel_style(bubble_bg, border, radii, 1)
 
     def set_text(self, text: str):
+        if text == self._label.text():
+            return
+        old_height = self.height()
+        if self._streaming and old_height > 0:
+            self.setMaximumHeight(old_height)
         self._label.setText(text)
+        if self._streaming:
+            self._animate_stream_text()
+            QTimer.singleShot(0, lambda h=old_height: self._animate_stream_height(h))
 
     def set_reasoning(self, reasoning: str):
+        was_visible = self._reasoning_panel.isVisible()
+        old_height = self.height()
         self._reasoning = reasoning.strip()
+        if self._streaming and old_height > 0:
+            self.setMaximumHeight(old_height)
         self._reasoning_label.setText(self._reasoning)
         self._reasoning_panel.setVisible(self._should_show_reasoning())
+        if self._streaming:
+            if self._reasoning_panel.isVisible() and not was_visible:
+                self._animate_stream_text()
+            QTimer.singleShot(0, lambda h=old_height: self._animate_stream_height(h))
+
+    def _animate_stream_text(self):
+        if self._text_opacity_effect is None:
+            self._text_opacity_effect = QGraphicsOpacityEffect(self._label)
+            self._label.setGraphicsEffect(self._text_opacity_effect)
+        if self._text_fade_anim:
+            self._text_fade_anim.stop()
+        self._text_opacity_effect.setOpacity(0.55)
+        anim = QPropertyAnimation(self._text_opacity_effect, b"opacity", self)
+        anim.setDuration(140)
+        anim.setStartValue(0.55)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._text_fade_anim = anim
+        anim.start()
+
+    def _animate_stream_height(self, old_height: int):
+        if not self._streaming or old_height <= 0:
+            self.setMaximumHeight(16777215)
+            return
+        self.layout().activate()
+        target_height = max(old_height, self.sizeHint().height())
+        if target_height <= old_height:
+            self.setMaximumHeight(16777215)
+            return
+        if self._height_anim:
+            self._height_anim.stop()
+        anim = QPropertyAnimation(self, b"maximumHeight", self)
+        anim.setDuration(170)
+        anim.setStartValue(old_height)
+        anim.setEndValue(target_height)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.finished.connect(lambda: self.setMaximumHeight(16777215))
+        self._height_anim = anim
+        anim.start()
 
     def _should_show_reasoning(self) -> bool:
         return self._show_reasoning and bool(self._reasoning) and self._role != "user"
@@ -472,6 +526,7 @@ class MessageBubble(QWidget):
         else:
             self._typing_timer.stop()
             self._stream_label.hide()
+            self.setMaximumHeight(16777215)
 
 
 class ChatWindow(QWidget):
