@@ -11,6 +11,7 @@ from process_utils import app_base_dir
 BASE_DIR = app_base_dir()
 PIXELS_DIR = BASE_DIR / "pixels"
 FRAMES_PATH = PIXELS_DIR / "frames.json"
+PIXEL_FRAME_HOLD_BEATS = 3
 
 
 def pixel_path_for_character(character: str) -> str:
@@ -53,6 +54,12 @@ class PixelPetWidget(QWidget):
         self._move_target = QPoint()
         self._waiting_for_target = False
         self._hovering = False
+        self._hit_alpha_threshold = 8
+        self._hit_probe_offsets = (
+            (0, 0),
+            (-2, 0), (2, 0), (0, -2), (0, 2),
+            (-4, 0), (4, 0), (0, -4), (0, 4),
+        )
 
         self._anim_timer = QTimer(self)
         self._anim_timer.timeout.connect(self._advance_frame)
@@ -124,7 +131,7 @@ class PixelPetWidget(QWidget):
     def _restart_anim_timer(self):
         anim = self._frames.get(self._animation, {})
         fps = max(1, int(anim.get("fps", 8) or 8))
-        self._anim_timer.start(max(1, int(1000 / fps)))
+        self._anim_timer.start(max(1, int(1000 / fps * PIXEL_FRAME_HOLD_BEATS)))
 
     def _advance_frame(self):
         anim = self._frames.get(self._animation, {})
@@ -216,14 +223,24 @@ class PixelPetWidget(QWidget):
         local = self.mapFromGlobal(global_pos)
         if not self.rect().contains(local) or self._sheet_image.isNull():
             return False
+        return self._sprite_alpha_near(local.x(), local.y()) > self._hit_alpha_threshold
+
+    def _sprite_alpha_near(self, local_x: int, local_y: int) -> int:
         anim = self._frames.get(self._animation, {})
         row = max(0, min(int(anim.get("row", 0) or 0), self._total_rows - 1))
         frame = max(0, min(self._frame_index, self._total_cols - 1))
-        x = frame * self._frame_w + local.x()
-        y = row * self._frame_h + local.y()
-        if x < 0 or y < 0 or x >= self._sheet_image.width() or y >= self._sheet_image.height():
-            return False
-        return self._sheet_image.pixelColor(x, y).alpha() > 8
+        base_x = frame * self._frame_w
+        base_y = row * self._frame_h
+        alpha = 0
+        for dx, dy in self._hit_probe_offsets:
+            x = base_x + local_x + dx
+            y = base_y + local_y + dy
+            if x < 0 or y < 0 or x >= self._sheet_image.width() or y >= self._sheet_image.height():
+                continue
+            alpha = max(alpha, self._sheet_image.pixelColor(x, y).alpha())
+            if alpha > self._hit_alpha_threshold:
+                break
+        return alpha
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() != Qt.MouseButton.LeftButton:

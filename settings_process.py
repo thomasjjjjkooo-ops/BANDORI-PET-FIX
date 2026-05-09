@@ -80,7 +80,6 @@ def main():
     window.show()
     ret = app.exec()
     live2d.dispose()
-    cfg.save()
     return ret
 
 

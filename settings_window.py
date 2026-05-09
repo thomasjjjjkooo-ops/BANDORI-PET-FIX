@@ -625,7 +625,7 @@ class SettingsWindow(QWidget):
         self._model_manager = model_manager
         self._live2d = live2d_module
         characters = model_manager.characters
-        self._current_char = current_char or (characters[0] if characters else "")
+        self._current_char = current_char or (characters[0] if start_on_costumes and characters else "")
         self._current_costume = current_costume
         self._fps = current_fps
         self._opacity = current_opacity
@@ -635,6 +635,9 @@ class SettingsWindow(QWidget):
         self._selected_costume = ""
         self._configured_models = self._load_configured_models()
         self._selected_list_character = ""
+        self._editing_list_character = ""
+        self._editing_model_index = None
+        self._adding_model = False
         if self._current_char:
             self._selected_list_character = self._current_char
         elif self._configured_models:
@@ -726,10 +729,6 @@ class SettingsWindow(QWidget):
 
     def closeEvent(self, event):
         self._hide_costume_preview()
-        if not self._launched:
-            self._on_apply()
-        else:
-            self._save_llm_config()
         self._cleanup_workers()
         app = QApplication.instance()
         if app is not None:
@@ -1040,7 +1039,7 @@ class SettingsWindow(QWidget):
         self._switch_model_btn = QPushButton("切换\n角色/服装", self._model_detail_widget)
         self._switch_model_btn.setFixedSize(168, 168)
         self._switch_model_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._switch_model_btn.clicked.connect(self._enter_model_selection)
+        self._switch_model_btn.clicked.connect(self._edit_selected_model)
         action_col.addWidget(self._switch_model_btn, 0, Qt.AlignmentFlag.AlignHCenter)
         hint = BodyLabel("选择新的角色或服装", self._model_detail_widget)
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1145,6 +1144,18 @@ class SettingsWindow(QWidget):
         for key, btn in self._nav_buttons.items():
             btn.setChecked(key == "characters")
         self._animate_indicator("characters")
+
+    def _edit_selected_model(self):
+        self._editing_list_character = self._selected_list_character
+        self._editing_model_index = next(
+            (
+                idx for idx, item in enumerate(self._configured_models)
+                if item["character"] == self._selected_list_character
+            ),
+            None,
+        )
+        self._adding_model = False
+        self._enter_model_selection()
 
     def _clear_selection_cards(self):
         for card in self._selection_cards:
@@ -1848,6 +1859,16 @@ class SettingsWindow(QWidget):
     def _save_configured_models(self):
         if not self._cfg:
             return
+        selected = self._selected_model_item()
+        if selected:
+            self._cfg.set("character", selected["character"])
+            self._cfg.set("costume", selected["costume"])
+        elif self._configured_models:
+            self._cfg.set("character", self._configured_models[0]["character"])
+            self._cfg.set("costume", self._configured_models[0]["costume"])
+        else:
+            self._cfg.set("character", "")
+            self._cfg.set("costume", "")
         self._cfg.set("models", [dict(item) for item in self._configured_models])
         self._cfg.save()
 
@@ -1878,6 +1899,9 @@ class SettingsWindow(QWidget):
         for item in self._configured_models:
             if item["character"] == character:
                 self._selected_list_character = character
+                self._editing_list_character = ""
+                self._editing_model_index = None
+                self._adding_model = False
                 self._current_char = character
                 self._current_costume = item["costume"]
                 self._selected_costume = item["costume"]
@@ -1888,17 +1912,22 @@ class SettingsWindow(QWidget):
 
     def _add_model_from_list(self):
         self._selected_list_character = ""
+        self._editing_list_character = ""
+        self._editing_model_index = None
+        self._adding_model = True
         self._refresh_model_list()
         self._enter_model_selection()
 
     def _remove_model_list_item(self, character: str):
         self._configured_models = [item for item in self._configured_models if item["character"] != character]
+        self._editing_list_character = ""
+        self._editing_model_index = None
+        self._adding_model = False
         if self._selected_list_character == character:
             if self._configured_models:
                 self._select_model_list_item(self._configured_models[0]["character"])
             else:
                 self._selected_list_character = ""
-        self._save_configured_models()
         self._refresh_model_list()
         if self._selected_list_character:
             self._show_model_detail()
@@ -1909,18 +1938,73 @@ class SettingsWindow(QWidget):
         path = self._model_manager.get_model_json_path(character, costume)
         if not path:
             return
-        entry = {"character": character, "costume": costume, "path": path}
-        for idx, item in enumerate(self._configured_models):
-            if item["character"] == character:
-                preserved = dict(item)
-                preserved.update(entry)
-                entry = preserved
-                self._configured_models[idx] = entry
-                break
+        window_width = 400
+        window_height = 500
+        window_x = -1
+        window_y = -1
+        screen = QApplication.primaryScreen()
+        if screen:
+            geo = screen.availableGeometry()
+            window_x = geo.left() + (geo.width() - window_width) // 2
+            window_y = geo.top() + (geo.height() - window_height) // 2
+        entry = {
+            "character": character,
+            "costume": costume,
+            "path": path,
+            "window_x": window_x,
+            "window_y": window_y,
+            "window_width": window_width,
+            "window_height": window_height,
+            "pixel_window_x": -1,
+            "pixel_window_y": -1,
+            "pet_mode": "live2d",
+        }
+        replace_index = self._editing_model_index
+        if replace_index is None and not self._adding_model:
+            replace_character = self._editing_list_character or self._selected_list_character
+            for idx, item in enumerate(self._configured_models):
+                if item["character"] == replace_character:
+                    replace_index = idx
+                    break
+        if replace_index is not None and 0 <= replace_index < len(self._configured_models):
+            preserved = dict(self._configured_models[replace_index])
+            preserved.update(entry)
+            for key in (
+                "window_x",
+                "window_y",
+                "window_width",
+                "window_height",
+                "pixel_window_x",
+                "pixel_window_y",
+            ):
+                if key in self._configured_models[replace_index]:
+                    preserved[key] = self._configured_models[replace_index][key]
+            entry = preserved
+            self._configured_models[replace_index] = entry
         else:
-            self._configured_models.append(entry)
+            for idx, item in enumerate(self._configured_models):
+                if item["character"] == character:
+                    preserved = dict(item)
+                    preserved.update(entry)
+                    for key in (
+                        "window_x",
+                        "window_y",
+                        "window_width",
+                        "window_height",
+                        "pixel_window_x",
+                        "pixel_window_y",
+                    ):
+                        if key in item:
+                            preserved[key] = item[key]
+                    entry = preserved
+                    self._configured_models[idx] = entry
+                    break
+            else:
+                self._configured_models.append(entry)
         self._selected_list_character = character
-        self._save_configured_models()
+        self._editing_list_character = ""
+        self._editing_model_index = None
+        self._adding_model = False
         self._refresh_model_list()
         if not self._selecting_model:
             self._show_model_detail()
@@ -2024,11 +2108,22 @@ class SettingsWindow(QWidget):
         if self._launched:
             return
         self._launched = True
-        self._save_llm_config()
         selected = self._selected_model_item()
         if selected:
             self._current_char = selected["character"]
             self._selected_costume = selected["costume"]
+        if self._show_launch and not (self._current_char and self._selected_costume):
+            self._launched = False
+            InfoBar.warning(
+                "请选择 Live2D 模型",
+                "首次启动前需要先选择角色和服装。",
+                duration=2500,
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+        self._save_llm_config()
+        self._save_configured_models()
         if self._current_char and self._selected_costume:
             self.model_selected.emit(self._current_char, self._selected_costume)
         self.settings_changed.emit({
@@ -2037,8 +2132,7 @@ class SettingsWindow(QWidget):
             "dark_theme": self._theme_switch.isChecked(),
             "vsync": self._vsync_switch.isChecked(),
         })
-        if self._show_launch:
-            self.launch_requested.emit()
+        self.launch_requested.emit()
         self.close()
 
     def connect_ipc_output(self):

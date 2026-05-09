@@ -11,6 +11,7 @@ if LIVE2D_PACKAGE not in sys.path:
     sys.path.insert(0, LIVE2D_PACKAGE)
 
 from PySide6.QtCore import Qt, QProcess
+from shiboken6 import isValid
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
@@ -109,11 +110,18 @@ def main():
         return result
 
     def save_config():
+        cfg.load()
         cfg.set("language", current_language())
         cfg.save()
 
     def close_pet_processes():
         for process in list(pet_window_ref.get("processes", [])):
+            if not isValid(process):
+                continue
+            try:
+                process.finished.disconnect()
+            except RuntimeError:
+                pass
             if process.state() != QProcess.ProcessState.NotRunning:
                 process.terminate()
                 if not process.waitForFinished(1500):
@@ -131,6 +139,7 @@ def main():
         pet_window_ref["vsync"] = data.get("vsync", True)
 
     def launch_pet():
+        cfg.load()
         if pet_window_ref.get("dark", False):
             setTheme(Theme.DARK)
             cfg.set("dark_theme", True)
@@ -144,10 +153,11 @@ def main():
         models = configured_models()
         selected_char = pet_window_ref.get("char")
         selected_costume = pet_window_ref.get("costume")
-        if selected_char and selected_costume and selected_char not in {m["character"] for m in models}:
+        if not models and selected_char and selected_costume:
             path = ModelManager.get_model_json_path(selected_char, selected_costume)
             if path:
                 models.append({"character": selected_char, "costume": selected_costume, "path": path})
+        close_pet_processes()
         pet_window_ref["processes"] = []
         for idx, model in enumerate(models):
             process = QProcess(app)
@@ -170,6 +180,8 @@ def main():
             print(data)
 
     def clear_pet_process(process):
+        if not isValid(process):
+            return
         processes = pet_window_ref.get("processes", [])
         if process in processes:
             processes.remove(process)
@@ -206,6 +218,8 @@ def main():
             print(data)
 
     def clear_settings_process(process):
+        if not isValid(process):
+            return
         if settings_process_ref.get("process") is process:
             buffered = settings_process_ref.get("stdout_buffer", "")
             if buffered:
@@ -254,18 +268,14 @@ def main():
         and char in mgr.characters
         and ModelManager.get_model_json_path(char, costume)
     )
-
-    if not model_valid:
-        if mgr.characters:
-            char = mgr.characters[0]
-            costume = mgr.get_default_costume(char)
+    has_configured_models = bool(configured_models())
 
     init_tray()
 
     app.aboutToQuit.connect(save_config)
     app.aboutToQuit.connect(close_pet_processes)
 
-    if configured_models() or model_valid:
+    if has_configured_models or model_valid:
         pet_window_ref["char"] = char
         pet_window_ref["costume"] = costume
         pet_window_ref["vsync"] = cfg.get("vsync", True)

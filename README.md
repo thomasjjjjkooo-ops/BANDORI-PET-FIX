@@ -96,7 +96,7 @@ git clone https://github.com/EasyLive2D/live2d-py.git third_party/live2d-py
 
 **Live2D Cubism 核心库：**
 
-> ⚠️ 必须自行前往 [Live2D 官网](https://www.live2d.com/en/sdk/download/native/) 下载 Cubism SDK for Native。下载后将动态库文件（`Live2DCubismCore.dll` / `.dylib` / `.so`）放入 `third_party/live2d-py/package/live2d/` 目录下。
+> ⚠️ 必须自行前往 [Live2D 官网](https://www.live2d.com/en/sdk/download/native/) 下载 Cubism SDK for Native。下载后解压到 `third_party/CubismSdkForNative-5-r.5` 目录下。
 
 ### 5. 启动！
 
