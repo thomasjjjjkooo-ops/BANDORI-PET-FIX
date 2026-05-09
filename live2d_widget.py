@@ -270,18 +270,19 @@ class Live2DWidget(QOpenGLWidget):
         model.Update()
         model.Draw()
 
-        if not self._alpha_readback_broken:
+        if not getattr(self, "_alpha_readback_broken", False):
             pw = max(1, int(self._cache_w * self._system_scale))
             ph = max(1, int(self._cache_h * self._system_scale))
-            if (self._alpha_cache is None
-                    or self._alpha_cache_w != pw
-                    or self._alpha_cache_h != ph):
-                self._alpha_cache = (ctypes.c_ubyte * (pw * ph * 4))()
+            cache = getattr(self, "_alpha_cache", None)
+            if (cache is None
+                    or getattr(self, "_alpha_cache_w", 0) != pw
+                    or getattr(self, "_alpha_cache_h", 0) != ph):
+                cache = (ctypes.c_ubyte * (pw * ph * 4))()
+                self._alpha_cache = cache
                 self._alpha_cache_w = pw
                 self._alpha_cache_h = ph
             try:
-                gl.glReadPixels(0, 0, pw, ph, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE,
-                                self._alpha_cache)
+                gl.glReadPixels(0, 0, pw, ph, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, cache)
             except Exception:
                 pass
 
@@ -393,7 +394,7 @@ class Live2DWidget(QOpenGLWidget):
                 pass
         if self._alpha_near(x, y) > self._hit_alpha_threshold:
             return True
-        if self._alpha_readback_broken:
+        if getattr(self, "_alpha_readback_broken", False):
             # Drivers with broken alpha readback (AMD on Qt6 + DWM): use an
             # ellipse approximating the typical Live2D character silhouette.
             # Less precise than per-pixel alpha, but lets the widget corners
@@ -422,12 +423,14 @@ class Live2DWidget(QOpenGLWidget):
             return 0
         if x < 0 or y < 0 or x >= self._cache_w or y >= self._cache_h:
             return 0
-        cache = self._alpha_cache
-        if cache is None or self._alpha_cache_w == 0:
+        cache = getattr(self, "_alpha_cache", None)
+        cw = getattr(self, "_alpha_cache_w", 0)
+        ch = getattr(self, "_alpha_cache_h", 0)
+        if cache is None or cw == 0:
             return 0
         sx = int(x * self._system_scale)
         sy = int((self._cache_h - y) * self._system_scale)
-        if sx < 0 or sx >= self._alpha_cache_w or sy < 0 or sy >= self._alpha_cache_h:
+        if sx < 0 or sx >= cw or sy < 0 or sy >= ch:
             return 0
-        idx = (sy * self._alpha_cache_w + sx) * 4 + 3
+        idx = (sy * cw + sx) * 4 + 3
         return cache[idx]
