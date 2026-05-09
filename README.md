@@ -1,0 +1,193 @@
+# 🎸 BandoriPet — 把バンドリ角色养在桌面上！
+
+<p align="center">
+  <a href="https://github.com/HELPMEEADICE/BANDORI-PET-REV"><img alt="GitHub Repo" src="https://img.shields.io/badge/GitHub-BANDORI--PET--REV-ff69b4?logo=github"></a>
+  <a href="https://github.com/HELPMEEADICE/BANDORI-PET-REV/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/HELPMEEADICE/BANDORI-PET-REV?color=blue"></a>
+  <a href="https://github.com/HELPMEEADICE/BANDORI-PET-REV/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/HELPMEEADICE/BANDORI-PET-REV?color=yellow"></a>
+  <a href="https://github.com/HELPMEEADICE/BANDORI-PET-REV/network/members"><img alt="Forks" src="https://img.shields.io/github/forks/HELPMEEADICE/BANDORI-PET-REV?color=orange"></a>
+  <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white"></a>
+  <a href="https://www.live2d.com/"><img alt="Live2D" src="https://img.shields.io/badge/Live2D-Cubism%20v2-EE82EE?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMSAxNy45M2MtMy45NS0uNDktNy0zLjg1LTctNy45M3MzLjA1LTcuNDQgNy03LjkzdjE1Ljg2em0yLTE1Ljg2YzMuOTUuNDkgNyAzLjg1IDcgNy45M3MtMy4wNSA3LjQ0LTcgNy45M1Y0LjA3eiIvPjwvc3ZnPg=="></a>
+  <a href="https://github.com/HELPMEEADICE/BANDORI-PET-REV"><img alt="Last Commit" src="https://img.shields.io/github/last-commit/HELPMEEADICE/BANDORI-PET-REV?color=green"></a>
+</p>
+
+> **⚠️ 免责声明：本项目仅供学习交流使用。角色模型版权归原作者及版权方所有，请勿用于商业用途。**
+
+你是否曾幻想过香澄每天早上对你喊「キラキラドキドキ！」？你是否想在工作摸鱼的时候让友希那在一旁冷冷地盯着你（然后偷偷露出猫耳）？你是否想让爱音在你桌面上炫耀她刚学会的吉他 riff？你是否想把祥子和灯放在同一张桌面上上演属于你的 MyGO×AveMujica 小剧场……
+
+**现在，你的梦想实现了！！！**
+
+BandoriPet 是一个基于 Live2D Cubism SDK 和 PySide6 的开源桌面宠物项目，支持 **51+ 位** BanG Dream! 角色、**305+ 套**服装，让你的桌面一秒变成 CiRCLE 排练室！
+
+![Example](example.png)
+
+---
+
+## ✨ 特性
+
+- 🎭 **Live2D 实时渲染** — 支持头部追踪、拖拽移动、点击互动，老婆会跟着你的鼠标转头！
+- 💬 **LLM 角色扮演聊天** — 接入大语言模型，每个角色都有专属 System Prompt，支持中日英多语言 + 动作标签。
+- 🎨 **像素风桌面宠物** — 也可以切成像素小人的形态，CPU 友好，可爱不减！
+- 🌓 **Fluent Design 设置面板** — 暗色/亮色主题切换，图形化选角选装界面。
+- 📌 **始终置顶 + 无边框** — 趴在你的窗口上方，赶都赶不走（误）。
+- 🔔 **系统托盘** — 右键一键切角色 / 开设置 / 优雅退场。
+- 👥 **多角色同时显示** — 不止一个！你想放几个就放几个（只要你 GPU 撑得住）。
+
+---
+
+## 📦 快速开始
+
+### 1. 环境要求
+
+- **Python 3.10+**
+- Windows / macOS / Linux
+- 支持 OpenGL 3.3+ 的显卡（核显也能跑）
+
+### 2. 克隆仓库
+
+```bash
+git clone https://github.com/yourusername/BandoriPet.git
+cd BandoriPet
+```
+
+### 3. 下载模型文件（必需！）
+
+> 🚨 **模型文件体积较大（~2GB），未纳入本仓库，请手动下载后放入 `models/` 目录。**
+
+模型包包含 51 位角色的全部 Live2D 模型资源（`.moc`、贴图、动作/表情配置文件等）。
+
+| 下载渠道 | 链接 |
+|----------|------|
+| 🚀 **ModelScope**（推荐，国内直连快） | [models.7z](https://modelscope.cn/datasets/HELPMEEADICE/BanG-Dream-Live2D/resolve/master/models.7z) |
+| ☁️ **Google Drive** | [下载](https://drive.google.com/file/d/1qX9rEhBviT5auwCLg7g3klBbT5wAbjnL) |
+| 🐌 **百度网盘** | [下载](https://pan.baidu.com/s/17GAJy2_WEZZbdVdZAMfXHQ?pwd=3724) 提取码：`3724` |
+
+下载后将 `models/` 解压到项目根目录，目录结构应为：
+
+```
+BandoriPet/
+├── models/
+│   ├── kasumi/
+│   ├── yukina/
+│   ├── anon/
+│   ├── tomorin/
+│   └── ...
+```
+
+### 4. 安装依赖
+
+**Python 包：**
+
+```bash
+pip install -r requirements.txt
+```
+
+**第三方依赖（从源码编译时需要）：**
+
+```bash
+mkdir third_party
+
+# PyQt-Fluent-Widgets（必须用 PySide6 分支！）
+git clone -b PySide6 --single-branch https://github.com/zhiyiYo/PyQt-Fluent-Widgets.git third_party/PyQt-Fluent-Widgets
+pip install -e third_party/PyQt-Fluent-Widgets
+
+# live2d-py（Live2D Python 绑定，无需 pip install，main.py 会注入 sys.path）
+git clone https://github.com/EasyLive2D/live2d-py.git third_party/live2d-py
+```
+
+**Live2D Cubism 核心库：**
+
+> ⚠️ 必须自行前往 [Live2D 官网](https://www.live2d.com/en/sdk/download/native/) 下载 Cubism SDK for Native。下载后将动态库文件（`Live2DCubismCore.dll` / `.dylib` / `.so`）放入 `third_party/live2d-py/package/live2d/` 目录下。
+
+### 5. 启动！
+
+```bash
+python main.py
+```
+
+---
+
+## 🧸 支持的乐队 & 角色
+
+全部 **51 位**角色均支持 Live2D 模型显示与 **300+ 套**服装。已配置 LLM 角色扮演 Prompt 的角色可开启 AI 对话。
+
+| 乐队 | 角色 | 服装 | LLM |
+|------|------|:---:|:---:|
+| **Poppin'Party** | 户山香澄 · 花园多惠 · 牛込里美 · 山吹沙绫 · 市谷有咲 | ✅ | ✅ |
+| **Afterglow** | 美竹兰 · 青叶摩卡 · 上原绯玛丽 · 宇田川巴 · 羽泽鸫 | ✅ | 部分 |
+| **Pastel\*Palettes** | 丸山彩 · 冰川日菜 · 白鹭千圣 · 大和麻弥 · 若宫伊芙 | ✅ | 🚧 |
+| **Hello, Happy World!** | 弦卷心 · 濑田薰 · 北泽育美 · 松原花音 · 奥泽美咲 | ✅ | 🚧 |
+| **Roselia** | 凑友希那 · 冰川纱夜 · 今井莉莎 · 宇田川亚子 · 白金燐子 | ✅ | 部分 |
+| **RAISE A SUILEN** | LAYER · MASKING · LOCK · PAREO · CHU² | ✅ | 🚧 |
+| **Morfonica** | 仓田真白 · 桐谷透子 · 广町七深 · 二叶筑紫 · 八潮瑠唯 | ✅ | 🚧 |
+| **MyGO!!!!!** | 千早爱音 · 高松灯 · 要乐奈 · 椎名立希 · 长崎素世 | ✅ | 🚧 |
+| **Ave Mujica** | 丰川祥子 · 若叶睦 · 三角初华 · 八幡海玲 · 祐天寺若麦 | ✅ | 🚧 |
+| **其他角色** | 纯田真奈 · 汐見蛍 等 | ✅ | 🚧 |
+
+> Poppin'Party 全员 + 美竹兰 + 凑友希那共 **7 位**角色已配置本地角色扮演 Prompt（`characters/` 目录）。更多角色的 Prompt 模板见 `PROMPT.md`，欢迎提交 PR 补全！
+
+---
+
+## 🎨 像素宠物 & 角色扮演扩展
+
+`pixels/` 目录下目前有有咲和乐奈的像素小人（`.webp` + 动作帧配置）。
+
+`characters/` 目录下有 14 位角色的高级 LLM 角色扮演 Prompt（含动作标签和表情系统）。
+
+**想要更多像素角色？想要给未配置的角色注入灵魂？**
+
+👉 **热烈欢迎 PR！** 只要你推的角色还没上，这就是你的回合！🎉
+
+- 像素风格宠物：参考 `pixels/` 下的格式添加新角色动作帧即可。
+- 高级角色扮演 Prompt：参考 `PROMPT.md` 和 `characters/` 下的现有 Prompt 格式。
+
+只要你也推 XX，我们就是异父异母的亲兄弟姐妹！🥹
+
+---
+
+## 🏗️ 从源码打包
+
+本项目使用 `cx_Freeze` 打包为独立可执行文件：
+
+```bash
+python setup.py build
+```
+
+构建产物在 `BUILD/` 下。注意打包时模型文件不会被打包进去，用户需自行下载放入 `models/`。
+
+---
+
+## 🛠️ 技术栈
+
+| 技术 | 用途 |
+|------|------|
+| **PySide6** | Qt for Python 主框架 |
+| **Live2D Cubism SDK for Native** | 角色模型渲染引擎 (v2) |
+| **live2d-py** | Live2D 的 Python 绑定封装 |
+| **PyQt-Fluent-Widgets** | Win11 风格 Fluent Design 组件库 |
+| **PyOpenGL** | OpenGL 渲染后端 |
+| **cx_Freeze** | 打包为独立 exe |
+
+---
+
+## 📄 许可
+
+本项目代码基于 [GPLv3](LICENSE) 开源。
+
+角色模型、贴图、动作等资源文件版权归原版权方所有，请勿用于商业用途。
+
+---
+
+## 🙏 致谢
+
+- [Live2D Cubism SDK](https://www.live2d.com/)
+- [PyQt-Fluent-Widgets](https://github.com/zhiyiYo/PyQt-Fluent-Widgets)
+- [live2d-py](https://github.com/EasyLive2D/live2d-py)
+- 所有为 BanG Dream! 角色模型做出贡献的同人作者们 💙
+
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=HELPMEEADICE/BANDORI-PET-REV&type=Date)](https://star-history.com/#HELPMEEADICE/BANDORI-PET-REV&Date)
+
+---
+
+<p align="center"><strong>キラキラドキドキ！～ ✨</strong></p>

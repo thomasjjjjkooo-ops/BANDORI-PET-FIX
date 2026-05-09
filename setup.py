@@ -1,4 +1,5 @@
 import sys
+import platform
 from pathlib import Path
 
 from cx_Freeze import Executable, setup
@@ -31,6 +32,27 @@ def include_if_exists(path: str) -> tuple[str, str] | None:
     return str(src), path
 
 
+def release_platform_name() -> str:
+    if sys.platform == "win32":
+        return "WIN"
+    if sys.platform == "darwin":
+        return "MACOS"
+    if sys.platform.startswith("linux"):
+        return "LINUX"
+    return sys.platform.upper().replace("-", "_")
+
+
+def release_arch_name() -> str:
+    machine = platform.machine().lower()
+    if machine in {"amd64", "x86_64"}:
+        return "AMD64"
+    if machine in {"arm64", "aarch64"}:
+        return "ARM64"
+    if machine in {"x86", "i386", "i686"}:
+        return "X86"
+    return machine.upper().replace("-", "_")
+
+
 include_files = [
     include_if_exists("logo.ico"),
     include_if_exists("band.json"),
@@ -44,6 +66,7 @@ include_files = [
 include_files = [item for item in include_files if item is not None]
 
 build_exe_options = {
+    "build_exe": str(BASE_DIR / "BUILD" / f"BANDORI-PET-REV-RELEASE-{release_platform_name()}-{release_arch_name()}"),
     "include_files": include_files,
     "packages": [
         "OpenGL",
