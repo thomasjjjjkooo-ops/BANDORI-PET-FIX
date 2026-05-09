@@ -11,6 +11,7 @@ from process_utils import app_base_dir
 BASE_DIR = app_base_dir()
 PIXELS_DIR = BASE_DIR / "pixels"
 FRAMES_PATH = PIXELS_DIR / "frames.json"
+PIXEL_FRAME_HOLD_BEATS = 3
 
 
 def pixel_path_for_character(character: str) -> str:
@@ -124,7 +125,7 @@ class PixelPetWidget(QWidget):
     def _restart_anim_timer(self):
         anim = self._frames.get(self._animation, {})
         fps = max(1, int(anim.get("fps", 8) or 8))
-        self._anim_timer.start(max(1, int(1000 / fps)))
+        self._anim_timer.start(max(1, int(1000 / fps * PIXEL_FRAME_HOLD_BEATS)))
 
     def _advance_frame(self):
         anim = self._frames.get(self._animation, {})
