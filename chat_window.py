@@ -22,7 +22,6 @@ from llm_manager import (
     build_system_prompt, LLMStreamWorker, NonStreamWorker,
     parse_action_tags, strip_action_tags,
 )
-from action_bus import publish_action
 
 
 _BG_LIGHT = "#f5f7fb"
@@ -577,17 +576,15 @@ class ChatWindow(QWidget):
     action_triggered = Signal(str, str)
     closed = Signal()
 
-    def __init__(self, character: str, model_manager, live2d_module,
-                 config_manager, parent_pet=None, group_characters=None):
+    def __init__(self, character: str, model_manager,
+                 config_manager, group_characters=None):
         super().__init__()
         self._character = character
         self._group_characters = group_characters or []
         self._is_group_chat = len(self._group_characters) > 1
         self._conversation_key = "__group__" if self._is_group_chat else character
         self._model_manager = model_manager
-        self._live2d = live2d_module
         self._cfg = config_manager
-        self._parent_pet = parent_pet
         self._conv_id: int | None = None
         self._worker = None
         self._current_bubble: MessageBubble | None = None
@@ -1556,36 +1553,9 @@ class ChatWindow(QWidget):
             self.action_triggered.emit(self._pending_action_character, action)
         self._pending_actions.clear()
 
-    def emit_action_for_ipc(self, character: str, action: str):
-        publish_action(character, action)
-        print(f"ACTION\t{character}\t{action}", flush=True)
-
     def _scroll_to_bottom(self):
         sb = self._scroll.verticalScrollBar()
         sb.setValue(sb.maximum())
-
-    def position_next_to_pet(self, pet_window: QWidget):
-        pet_geo = pet_window if isinstance(pet_window, QRect) else pet_window.geometry()
-        screen = QApplication.primaryScreen()
-        if screen:
-            screen_geo = screen.availableGeometry()
-        else:
-            screen_geo = pet_geo
-
-        chat_w = self.width()
-        left_space = pet_geo.left() - screen_geo.left()
-        right_space = screen_geo.right() - pet_geo.right()
-
-        if left_space >= chat_w + 20:
-            x = pet_geo.left() - chat_w - 16
-        elif right_space >= chat_w + 20:
-            x = pet_geo.right() + 16
-        else:
-            x = max(screen_geo.left(), pet_geo.left() - chat_w - 16)
-
-        y = pet_geo.top() + (pet_geo.height() - self.height()) // 2
-        y = max(screen_geo.top(), min(y, screen_geo.bottom() - self.height()))
-        self.move(x, y)
 
     def closeEvent(self, event):
         if not self._closing:
