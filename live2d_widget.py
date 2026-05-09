@@ -30,10 +30,12 @@ class Live2DWidget(QOpenGLWidget):
         """
         fmt = QSurfaceFormat()
         fmt.setAlphaBufferSize(8)
-        fmt.setSamples(4)
-        fmt.setDepthBufferSize(0)  # 彻底关闭深度缓冲，杜绝 Z-fighting 撕裂
+        fmt.setSamples(0)
+        fmt.setDepthBufferSize(0)
         fmt.setStencilBufferSize(8)
         fmt.setSwapInterval(0)
+        fmt.setVersion(2, 1)
+        fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CompatibilityProfile)
         QSurfaceFormat.setDefaultFormat(fmt)
 
     def __init__(self, parent=None):
@@ -167,7 +169,7 @@ class Live2DWidget(QOpenGLWidget):
         self._safe_make_current()
         try:
             self._model = self._live2d.LAppModel()
-            self._model.LoadModelJson(model_json_path)
+            self._model.LoadModelJson(model_json_path, disable_precision=True)
             self._model.Resize(self._cache_w, self._cache_h)
             self._model_path = model_json_path
         except Exception as e:

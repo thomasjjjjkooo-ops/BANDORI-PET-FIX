@@ -5,5 +5,6 @@ pixels/
 build/
 BandoriPet.egg-info/
 third_party/
+venv/
 config.json
 data.*
