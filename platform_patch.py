@@ -6,6 +6,41 @@ from process_utils import app_base_dir
 
 BASE_DIR = str(app_base_dir())
 MODELS_DIR = os.path.join(BASE_DIR, "models")
+_LIVE2D_TEXTURE_QUALITY = "balanced"
+_TEXTURE_MAX_ANISOTROPY_EXT = 0x84FE
+_MAX_TEXTURE_MAX_ANISOTROPY_EXT = 0x84FF
+
+
+def set_live2d_texture_quality(profile: str):
+    global _LIVE2D_TEXTURE_QUALITY
+    if profile in {"performance", "balanced", "quality", "ultra"}:
+        _LIVE2D_TEXTURE_QUALITY = profile
+    else:
+        _LIVE2D_TEXTURE_QUALITY = "balanced"
+
+
+def _texture_options() -> tuple[int, int, bool, float]:
+    if _LIVE2D_TEXTURE_QUALITY == "performance":
+        return gl.GL_NEAREST, gl.GL_NEAREST, False, 1.0
+    if _LIVE2D_TEXTURE_QUALITY == "quality":
+        return gl.GL_LINEAR_MIPMAP_LINEAR, gl.GL_LINEAR, True, 1.0
+    if _LIVE2D_TEXTURE_QUALITY == "ultra":
+        return gl.GL_LINEAR_MIPMAP_LINEAR, gl.GL_LINEAR, True, 4.0
+    return gl.GL_LINEAR, gl.GL_LINEAR, False, 1.0
+
+
+def _apply_anisotropy(level: float):
+    if level <= 1.0:
+        return
+    try:
+        max_level = float(gl.glGetFloatv(_MAX_TEXTURE_MAX_ANISOTROPY_EXT))
+        gl.glTexParameterf(
+            gl.GL_TEXTURE_2D,
+            _TEXTURE_MAX_ANISOTROPY_EXT,
+            min(level, max_level),
+        )
+    except Exception:
+        pass
 
 
 def _bleed_transparent_edges(image: Image.Image, passes: int = 2) -> Image.Image:
@@ -74,6 +109,7 @@ class PatchedPlatformManager:
         if image.mode != "RGBA":
             image = image.convert("RGBA")
         image = _bleed_transparent_edges(image)
+        min_filter, mag_filter, use_mipmap, anisotropy = _texture_options()
 
         width, height = image.size
         texture = gl.glGenTextures(1)
@@ -90,10 +126,16 @@ class PatchedPlatformManager:
             gl.GL_UNSIGNED_BYTE,
             image.tobytes(),
         )
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
-        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+        if use_mipmap:
+            try:
+                gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
+            except Exception:
+                min_filter = gl.GL_LINEAR
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, min_filter)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, mag_filter)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
         gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
+        _apply_anisotropy(anisotropy)
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
         live2DModel.setTexture(no, texture)
 

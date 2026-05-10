@@ -4,7 +4,7 @@ import os
 import random
 import re
 
-from PySide6.QtCore import Qt, QPoint, QTimer, QPropertyAnimation, QEasingCurve, QProcess, QEvent, QElapsedTimer
+from PySide6.QtCore import Qt, QPoint, QTimer, QPropertyAnimation, QEasingCurve, QProcess, QEvent
 from PySide6.QtGui import QColor, QIcon, QCursor, QMoveEvent, QResizeEvent
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QApplication, QSystemTrayIcon, QMenu, QStackedLayout,
@@ -17,7 +17,8 @@ from qfluentwidgets import (
 
 from i18n_manager import tr as _tr
 from action_bus import consume_actions
-from live2d_widget import Live2DWidget
+from settings_bus import consume_settings
+from live2d_widget import Live2DWidget, normalize_live2d_quality
 from model_manager import ModelManager
 from pixel_pet_widget import PixelPetWidget, load_pixel_frames, pixel_path_for_character
 from process_utils import app_base_dir, process_program_and_args
@@ -117,9 +118,14 @@ class PetWindow(QWidget):
         self._fps = fps
         self._opacity = opacity
         self._vsync = True
+        self._live2d_quality = "balanced"
         self._tray_icon = None
         self._enable_tray = enable_tray
         self._cfg = config_manager
+        if self._cfg:
+            self._live2d_quality = normalize_live2d_quality(
+                self._cfg.get("live2d_quality", "balanced")
+            )
         self._radial_menu = None
         self._chat_process = None
         self._settings_process = None
@@ -129,11 +135,9 @@ class PetWindow(QWidget):
         self._show_pos_set = False
         self._motion_guard_token = 0
         self._mouse_passthrough = False
+        # QOpenGLWidget alpha reads are not reliable during WM_NCHITTEST on
+        # Windows 11; keep hit sampling on the Qt timer path.
         self._use_native_hit_test_passthrough = False
-        self._hit_grace_ms = 250
-        self._last_hit_ms = -10000
-        self._hit_clock = QElapsedTimer()
-        self._hit_clock.start()
         self._passthrough_timer = QTimer(self)
         self._passthrough_timer.setInterval(50)
         self._passthrough_timer.timeout.connect(self._update_mouse_passthrough)
@@ -141,6 +145,10 @@ class PetWindow(QWidget):
         self._action_bus_timer = QTimer(self)
         self._action_bus_timer.setInterval(120)
         self._action_bus_timer.timeout.connect(self._poll_action_bus)
+        self._settings_bus_seen: set[str] = set()
+        self._settings_bus_timer = QTimer(self)
+        self._settings_bus_timer.setInterval(200)
+        self._settings_bus_timer.timeout.connect(self._poll_settings_bus)
         self._position_save_timer = QTimer(self)
         self._position_save_timer.setSingleShot(True)
         self._position_save_timer.setInterval(250)
@@ -152,6 +160,7 @@ class PetWindow(QWidget):
         self._load_initial_model()
         self._passthrough_timer.start()
         self._action_bus_timer.start()
+        self._settings_bus_timer.start()
         QApplication.instance().installEventFilter(self)
 
         self.setWindowOpacity(self._opacity)
@@ -184,6 +193,7 @@ class PetWindow(QWidget):
         self._live2d_widget.set_click_callback(self._on_click)
         self._live2d_widget.set_right_click_callback(self._on_right_click)
         self._live2d_widget.set_fps(self._fps)
+        self._live2d_widget.set_render_quality(self._live2d_quality)
         self._stack.addWidget(self._live2d_widget)
 
         self._pixel_widget = PixelPetWidget(self)
@@ -248,7 +258,11 @@ class PetWindow(QWidget):
         return super().eventFilter(obj, event)
 
     def _set_mouse_passthrough(self, enabled: bool):
-        if os.name != "nt" or enabled == self._mouse_passthrough:
+        if (
+            os.name != "nt"
+            or self._use_native_hit_test_passthrough
+            or enabled == self._mouse_passthrough
+        ):
             return
         self._apply_passthrough_to_hwnd(int(self.winId()), enabled)
         self._mouse_passthrough = enabled
@@ -274,21 +288,11 @@ class PetWindow(QWidget):
 
     def _is_interaction_hit(self, global_pos: QPoint) -> bool:
         if self._pixel_mode:
-            hit = self._pixel_widget.is_sprite_hit_at_global(global_pos)
-        else:
-            hit = self._live2d_widget.is_model_hit_at_global(global_pos)
-        if hit:
-            self._last_hit_ms = self._hit_clock.elapsed()
-            return True
-        return self._is_recent_interaction_hit(global_pos)
-
-    def _is_recent_interaction_hit(self, global_pos: QPoint) -> bool:
-        if not self.geometry().contains(global_pos):
-            return False
-        return self._hit_clock.elapsed() - self._last_hit_ms <= self._hit_grace_ms
+            return self._pixel_widget.is_sprite_hit_at_global(global_pos)
+        return self._live2d_widget.is_model_hit_at_global(global_pos)
 
     def _update_mouse_passthrough(self):
-        if os.name != "nt" or not self.isVisible():
+        if os.name != "nt" or self._use_native_hit_test_passthrough or not self.isVisible():
             return
         if self._live2d_widget._dragging or self._pixel_widget._dragging:
             return
@@ -428,6 +432,9 @@ class PetWindow(QWidget):
         if "vsync" in data:
             self._vsync = data["vsync"]
             self._live2d_widget.set_vsync(data["vsync"])
+        if "live2d_quality" in data:
+            self._live2d_quality = normalize_live2d_quality(data["live2d_quality"])
+            self._live2d_widget.set_render_quality(self._live2d_quality)
         self._save_config()
 
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason):
@@ -531,6 +538,10 @@ class PetWindow(QWidget):
     def _poll_action_bus(self):
         for action in consume_actions(self._current_char, self._action_bus_seen):
             self._on_chat_action(action)
+
+    def _poll_settings_bus(self):
+        for settings in consume_settings(self._settings_bus_seen):
+            self._apply_settings(settings)
 
     def _read_chat_process_error(self, process: QProcess):
         data = bytes(process.readAllStandardError()).decode("utf-8", errors="replace").strip()
@@ -993,6 +1004,7 @@ class PetWindow(QWidget):
             self._cfg.set("opacity", self._opacity)
             self._cfg.set("dark_theme", isDarkTheme())
             self._cfg.set("vsync", self._vsync)
+            self._cfg.set("live2d_quality", self._live2d_quality)
             self._cfg.set("drag_locked", self._live2d_widget._drag_locked)
             if model_exists:
                 self._cfg.set("pet_mode", "pixel" if self._pixel_mode else "live2d")

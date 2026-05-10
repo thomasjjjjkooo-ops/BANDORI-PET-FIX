@@ -23,7 +23,7 @@ from process_utils import app_base_dir
 
 import json
 
-from live2d_widget import Live2DWidget
+from live2d_widget import Live2DWidget, normalize_live2d_quality
 
 _BG_LIGHT = "#ffffff"
 _BG_DARK = "#1e1e1e"
@@ -451,7 +451,7 @@ class CostumeItem(QPushButton):
 
 
 class Live2DPreviewBubble(QWidget):
-    def __init__(self, live2d_module, parent=None):
+    def __init__(self, live2d_module, quality_profile="balanced", parent=None):
         super().__init__(None)
         self._current_model_path = ""
         self.setWindowFlags(
@@ -469,6 +469,7 @@ class Live2DPreviewBubble(QWidget):
         layout.setContentsMargins(26, 10, 10, 10)
         self._live2d_widget = Live2DWidget(self)
         self._live2d_widget.set_live2d_module(live2d_module)
+        self._live2d_widget.set_render_quality(quality_profile)
         self._live2d_widget.set_static_render(True)
         self._apply_live2d_background()
         layout.addWidget(self._live2d_widget)
@@ -483,6 +484,9 @@ class Live2DPreviewBubble(QWidget):
             self._live2d_widget.set_clear_color(32 / 255, 32 / 255, 32 / 255, 1.0)
         else:
             self._live2d_widget.set_clear_color(1.0, 1.0, 1.0, 1.0)
+
+    def set_render_quality(self, profile: str):
+        self._live2d_widget.set_render_quality(profile)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -654,6 +658,9 @@ class SettingsWindow(QWidget):
         self._current_page = "characters"
         self._selecting_model = False
         self._vsync = vsync
+        self._live2d_quality = normalize_live2d_quality(
+            self._cfg.get("live2d_quality", "balanced") if self._cfg else "balanced"
+        )
         self._saved_user_name = ""
 
         icon_path = os.path.join(app_base_dir(), "logo.ico")
@@ -827,19 +834,23 @@ class SettingsWindow(QWidget):
         self._costume_page = self._build_costume_page()
         self._pov_page = self._build_pov_page()
         self._llm_page = self._build_llm_page()
+        self._quality_page = self._build_quality_page()
         self._costume_page.hide()
         self._llm_page.hide()
         self._pov_page.hide()
+        self._quality_page.hide()
 
         self._page_stack_layout.addWidget(self._char_page)
         self._page_stack_layout.addWidget(self._costume_page)
         self._page_stack_layout.addWidget(self._llm_page)
         self._page_stack_layout.addWidget(self._pov_page)
+        self._page_stack_layout.addWidget(self._quality_page)
 
         self._pages["characters"] = self._char_page
         self._pages["costumes"] = self._costume_page
         self._pages["llm"] = self._llm_page
         self._pages["pov"] = self._pov_page
+        self._pages["quality"] = self._quality_page
 
         page_scroll = ScrollArea()
         page_scroll.setWidgetResizable(True)
@@ -893,6 +904,11 @@ class SettingsWindow(QWidget):
         btn_pov.nav_activated.connect(self._on_nav_selected)
         self._nav_buttons["pov"] = btn_pov
         layout.addWidget(btn_pov)
+
+        btn_quality = NavButton("quality", FluentIcon.PHOTO, _tr("SettingsWindow.nav_quality"), sidebar)
+        btn_quality.nav_activated.connect(self._on_nav_selected)
+        self._nav_buttons["quality"] = btn_quality
+        layout.addWidget(btn_quality)
 
         layout.addStretch()
 
@@ -1486,6 +1502,54 @@ class SettingsWindow(QWidget):
 
         return page
 
+    def _quality_options(self) -> list[tuple[str, str]]:
+        return [
+            ("performance", _tr("SettingsWindow.quality_performance")),
+            ("balanced", _tr("SettingsWindow.quality_balanced")),
+            ("quality", _tr("SettingsWindow.quality_quality")),
+            ("ultra", _tr("SettingsWindow.quality_ultra")),
+        ]
+
+    def _quality_detail_text(self, profile: str) -> str:
+        return _tr(f"SettingsWindow.quality_detail_{normalize_live2d_quality(profile)}")
+
+    def _build_quality_page(self):
+        page = self._make_theme_widget(QWidget())
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+
+        title = TitleLabel(_tr("SettingsWindow.quality_title"), page)
+        layout.addWidget(title)
+        subtitle = SubtitleLabel(_tr("SettingsWindow.quality_subtitle"), page)
+        layout.addWidget(subtitle)
+
+        quality_label = BodyLabel(_tr("SettingsWindow.quality_profile"), page)
+        layout.addWidget(quality_label)
+
+        self._quality_combo = ComboBox(page)
+        self._quality_combo.setFixedHeight(36)
+        current_index = 0
+        for index, (profile, label) in enumerate(self._quality_options()):
+            self._quality_combo.addItem(label, userData=profile)
+            if profile == self._live2d_quality:
+                current_index = index
+        self._quality_combo.setCurrentIndex(current_index)
+        self._quality_combo.currentIndexChanged.connect(self._on_quality_changed)
+        layout.addWidget(self._quality_combo)
+
+        self._quality_detail = BodyLabel(self._quality_detail_text(self._live2d_quality), page)
+        self._quality_detail.setWordWrap(True)
+        layout.addWidget(self._quality_detail)
+
+        layout.addStretch()
+        return page
+
+    def _on_quality_changed(self, index: int):
+        profile = self._quality_combo.itemData(index)
+        self._live2d_quality = normalize_live2d_quality(profile)
+        self._quality_detail.setText(self._quality_detail_text(self._live2d_quality))
+
     def _style_llm_inputs(self):
         dark = isDarkTheme()
         input_bg = "#282828" if dark else "#ffffff"
@@ -2074,7 +2138,8 @@ class SettingsWindow(QWidget):
         if not model_path:
             return
         if self._preview_bubble is None:
-            self._preview_bubble = Live2DPreviewBubble(self._live2d, self)
+            self._preview_bubble = Live2DPreviewBubble(self._live2d, self._live2d_quality, self)
+        self._preview_bubble.set_render_quality(self._live2d_quality)
         self._preview_bubble.show_preview(model_path, anchor)
 
     def _hide_costume_preview(self):
@@ -2124,15 +2189,25 @@ class SettingsWindow(QWidget):
             return
         self._save_llm_config()
         self._save_configured_models()
-        if self._current_char and self._selected_costume:
-            self.model_selected.emit(self._current_char, self._selected_costume)
-        self.settings_changed.emit({
+        settings = {
             "fps": self._fps_slider.value(),
             "opacity": self._opacity_slider.value() / 100.0,
             "dark_theme": self._theme_switch.isChecked(),
             "vsync": self._vsync_switch.isChecked(),
-        })
-        self.launch_requested.emit()
+            "live2d_quality": self._live2d_quality,
+        }
+        if self._cfg:
+            self._cfg.set("fps", settings["fps"])
+            self._cfg.set("opacity", settings["opacity"])
+            self._cfg.set("dark_theme", settings["dark_theme"])
+            self._cfg.set("vsync", settings["vsync"])
+            self._cfg.set("live2d_quality", settings["live2d_quality"])
+            self._cfg.save()
+        if self._current_char and self._selected_costume:
+            self.model_selected.emit(self._current_char, self._selected_costume)
+        self.settings_changed.emit(settings)
+        if self._show_launch:
+            self.launch_requested.emit()
         self.close()
 
     def connect_ipc_output(self):

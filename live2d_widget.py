@@ -4,6 +4,19 @@ import OpenGL.GL as gl
 from PySide6.QtCore import Qt, QTimerEvent, QPoint, QElapsedTimer
 from PySide6.QtGui import QMouseEvent, QCursor, QGuiApplication, QSurfaceFormat, QOpenGLContext, QMoveEvent, QResizeEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
+from platform_patch import set_live2d_texture_quality
+
+
+LIVE2D_QUALITY_PROFILES = {
+    "performance": {"disable_precision": True},
+    "balanced": {"disable_precision": True},
+    "quality": {"disable_precision": True},
+    "ultra": {"disable_precision": True},
+}
+
+
+def normalize_live2d_quality(profile: str) -> str:
+    return profile if profile in LIVE2D_QUALITY_PROFILES else "balanced"
 
 
 def _get_display_refresh():
@@ -44,6 +57,7 @@ class Live2DWidget(QOpenGLWidget):
         self._live2d = None
         self._model_path = ""
         self._pending_model = ""
+        self._quality_profile = "balanced"
         self._system_scale = 1.0
         
         self._dragging = False
@@ -132,6 +146,15 @@ class Live2DWidget(QOpenGLWidget):
             pass
         self._restart_timer()
 
+    def set_render_quality(self, profile: str):
+        profile = normalize_live2d_quality(profile)
+        if profile == self._quality_profile:
+            return
+        self._quality_profile = profile
+        if self._model_path:
+            self._load_model_internal(self._model_path)
+            self.update()
+
     def set_static_render(self, enabled: bool):
         self._static_render = enabled
         self._static_render_done = False
@@ -162,6 +185,7 @@ class Live2DWidget(QOpenGLWidget):
     def set_model_path(self, model_json_path: str):
         self._pending_model = model_json_path
         self._static_render_done = False
+        self._clear_hit_framebuffer_cache()
         if self._initialized_gl:
             self._load_model_internal(model_json_path)
             if self._static_render:
@@ -172,8 +196,10 @@ class Live2DWidget(QOpenGLWidget):
             return
         self._safe_make_current()
         try:
+            set_live2d_texture_quality(self._quality_profile)
+            disable_precision = LIVE2D_QUALITY_PROFILES[self._quality_profile]["disable_precision"]
             self._model = self._live2d.LAppModel()
-            self._model.LoadModelJson(model_json_path, disable_precision=True)
+            self._model.LoadModelJson(model_json_path, disable_precision=disable_precision)
             self._model.Resize(self._cache_w, self._cache_h)
             self._model_path = model_json_path
         except Exception as e:
@@ -225,11 +251,13 @@ class Live2DWidget(QOpenGLWidget):
             self.update()
 
     def resizeGL(self, w: int, h: int):
+        self._clear_hit_framebuffer_cache()
         gl.glViewport(0, 0, int(w * self._system_scale), int(h * self._system_scale))
         if self._model:
             self._model.Resize(w, h)
 
     def paintGL(self):
+        self._clear_hit_framebuffer_cache()
         if self._static_render and self._static_render_done:
             return
 
@@ -353,16 +381,13 @@ class Live2DWidget(QOpenGLWidget):
         return self._is_model_hit_at(local.x(), local.y())
 
     def _is_model_hit_at(self, x: float, y: float) -> bool:
-        model = self._model
-        if not model:
+        if not self._model:
             return False
-        try:
-            if hasattr(model, "HitPart"):
-                if model.HitPart(x, y, topOnly=True):
-                    return True
-        except Exception:
-            pass
         return self._alpha_near(x, y) > self._hit_alpha_threshold
+
+    def _clear_hit_framebuffer_cache(self):
+        self._hit_framebuffer_image = None
+        self._hit_framebuffer_time = -10000
 
     def _alpha_near(self, x: float, y: float) -> int:
         alpha = 0
