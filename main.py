@@ -23,6 +23,7 @@ from live2d_widget import Live2DWidget
 from model_manager import ModelManager
 from config_manager import ConfigManager
 from i18n_manager import set_language, detect_system_language
+from settings_bus import publish_settings
 
 
 def main():
@@ -136,6 +137,15 @@ def main():
         pet_window_ref["opacity"] = data.get("opacity", 1.0)
         pet_window_ref["dark"] = data.get("dark_theme", False)
         pet_window_ref["vsync"] = data.get("vsync", True)
+        pet_window_ref["live2d_quality"] = data.get("live2d_quality", "balanced")
+        cfg.load()
+        cfg.set("fps", pet_window_ref["fps"])
+        cfg.set("opacity", pet_window_ref["opacity"])
+        cfg.set("dark_theme", pet_window_ref["dark"])
+        cfg.set("vsync", pet_window_ref["vsync"])
+        cfg.set("live2d_quality", pet_window_ref["live2d_quality"])
+        cfg.save()
+        publish_settings(data)
 
     def launch_pet():
         cfg.load()
@@ -148,6 +158,8 @@ def main():
             cfg.set("opacity", pet_window_ref["opacity"])
         if "vsync" in pet_window_ref:
             cfg.set("vsync", pet_window_ref["vsync"])
+        if "live2d_quality" in pet_window_ref:
+            cfg.set("live2d_quality", pet_window_ref["live2d_quality"])
         cfg.save()
         models = configured_models()
         selected_char = pet_window_ref.get("char")

@@ -1,11 +1,112 @@
 import sqlite3
 import os
+import tempfile
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from process_utils import app_base_dir
 
 BASE_DIR = app_base_dir()
 DB_PATH = os.path.join(BASE_DIR, "data.db")
+
+_REQUIRED_TABLES = {"conversations", "messages"}
+_REQUIRED_COLUMNS = {
+    "conversations": {"id", "character", "title", "created_at"},
+    "messages": {"id", "conversation_id", "role", "content", "created_at"},
+}
+
+
+def _same_path(a: str | os.PathLike, b: str | os.PathLike) -> bool:
+    return Path(a).resolve() == Path(b).resolve()
+
+
+def _validate_chat_database(conn: sqlite3.Connection):
+    tables = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    missing_tables = _REQUIRED_TABLES - tables
+    if missing_tables:
+        raise ValueError(f"missing table(s): {', '.join(sorted(missing_tables))}")
+
+    for table, required_columns in _REQUIRED_COLUMNS.items():
+        columns = {
+            row[1]
+            for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        missing_columns = required_columns - columns
+        if missing_columns:
+            raise ValueError(
+                f"table {table} missing column(s): {', '.join(sorted(missing_columns))}"
+            )
+
+
+def _ensure_database(db_path=DB_PATH):
+    manager = DatabaseManager(db_path)
+    manager.close()
+
+
+def chat_database_summary(db_path=DB_PATH) -> dict:
+    path = Path(db_path)
+    if not path.exists():
+        return {"conversations": 0, "messages": 0}
+    with closing(sqlite3.connect(str(path), timeout=10)) as conn:
+        _validate_chat_database(conn)
+        conversations = conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
+        messages = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    return {"conversations": conversations, "messages": messages}
+
+
+def export_chat_database(destination_path: str, source_path=DB_PATH) -> dict:
+    source = Path(source_path)
+    destination = Path(destination_path)
+    if _same_path(source, destination):
+        raise ValueError("source and destination are the same file")
+
+    _ensure_database(str(source))
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=destination.name + ".",
+        suffix=".tmp",
+        dir=str(destination.parent),
+    )
+    os.close(fd)
+    try:
+        with closing(sqlite3.connect(str(source), timeout=10)) as src:
+            _validate_chat_database(src)
+            with closing(sqlite3.connect(tmp_path, timeout=10)) as dst:
+                src.backup(dst)
+                dst.commit()
+        os.replace(tmp_path, destination)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+    return chat_database_summary(str(destination))
+
+
+def import_chat_database(source_path: str, target_path=DB_PATH) -> dict:
+    source = Path(source_path)
+    target = Path(target_path)
+    if not source.exists():
+        raise FileNotFoundError(str(source))
+    if _same_path(source, target):
+        raise ValueError("source and target are the same file")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    source_uri = source.resolve().as_uri() + "?mode=ro"
+    with closing(sqlite3.connect(source_uri, uri=True, timeout=10)) as src:
+        _validate_chat_database(src)
+        with closing(sqlite3.connect(str(target), timeout=10)) as dst:
+            src.backup(dst)
+            dst.commit()
+
+    _ensure_database(str(target))
+    return chat_database_summary(str(target))
 
 
 class DatabaseManager:
