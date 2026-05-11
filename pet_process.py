@@ -26,8 +26,34 @@ def _parse_args():
     parser = argparse.ArgumentParser(description="Run one isolated Live2D pet process.")
     parser.add_argument("--character", required=True)
     parser.add_argument("--costume", required=True)
+    parser.add_argument("--model-path", default="")
     parser.add_argument("--index", type=int, default=0)
     return parser.parse_args()
+
+
+class SingleModelManager:
+    def __init__(self, character: str, costume: str, model_path: str):
+        self._character = character
+        self._costume = costume
+        self._model_path = model_path
+
+    @property
+    def characters(self) -> list[str]:
+        return [self._character] if self._character else []
+
+    def get_default_costume(self, character: str) -> str:
+        return self._costume if character == self._character else ""
+
+    def get_model_json_path(self, character: str, costume: str) -> str:
+        if character == self._character and costume == self._costume:
+            return self._model_path
+        return ModelManager.get_model_json_path(character, costume)
+
+    def get_display_name(self, character: str) -> str:
+        return character.title()
+
+    def get_costume_display_name(self, character: str, costume_id: str) -> str:
+        return costume_id
 
 
 def _model_entry(cfg: ConfigManager, character: str) -> dict:
@@ -59,7 +85,7 @@ def main():
     app.setQuitOnLastWindowClosed(False)
     apply_app_theme(cfg.get("dark_theme", False))
 
-    mgr = ModelManager()
+    mgr = SingleModelManager(args.character, args.costume, args.model_path) if args.model_path else ModelManager()
     pet = PetWindow(
         live2d,
         model_manager=mgr,

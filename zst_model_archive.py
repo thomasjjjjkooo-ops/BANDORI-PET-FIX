@@ -1,11 +1,15 @@
 import json
+import posixpath
 import tarfile
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 
 
 VIRTUAL_SEP = "::"
 INDEX_MEMBER = ".bandori_zst_index.json"
+_VIRTUAL_BYTE_CACHE: dict[str, bytes] = {}
+_CACHE_LOCK = threading.RLock()
 
 
 def is_virtual_path(path: str) -> bool:
@@ -23,6 +27,12 @@ def split_virtual_path(path: str) -> tuple[str, str]:
 
 def load_virtual_bytes(path: str) -> bytes:
     archive_path, member_path = split_virtual_path(path)
+    cache_key = make_virtual_path(archive_path, member_path)
+    with _CACHE_LOCK:
+        cached = _VIRTUAL_BYTE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     with _open_tar_zst(archive_path) as archive:
         for member in archive:
             if not member.isfile() or _normalize_member(member.name) != member_path:
@@ -30,7 +40,10 @@ def load_virtual_bytes(path: str) -> bytes:
             extracted = archive.extractfile(member)
             if extracted is None:
                 break
-            return extracted.read()
+            data = extracted.read()
+            with _CACHE_LOCK:
+                _VIRTUAL_BYTE_CACHE[cache_key] = data
+            return data
     raise KeyError(path)
 
 
@@ -40,6 +53,91 @@ def read_virtual_text(path: str, encoding: str = "utf-8") -> str:
 
 def load_virtual_json(path: str) -> dict:
     return json.loads(read_virtual_text(path))
+
+
+def clear_virtual_byte_cache():
+    with _CACHE_LOCK:
+        _VIRTUAL_BYTE_CACHE.clear()
+
+
+def prefetch_virtual_model_resources(model_json_path: str):
+    if not is_virtual_path(model_json_path):
+        return
+
+    archive_path, model_member = split_virtual_path(model_json_path)
+    model_cache_key = make_virtual_path(archive_path, model_member)
+    model_bytes = load_virtual_bytes(model_cache_key)
+    try:
+        model_json = json.loads(model_bytes.decode("utf-8"))
+    except Exception:
+        return
+
+    target_members = _model_resource_members(model_member, model_json)
+    if not target_members:
+        return
+
+    with _CACHE_LOCK:
+        target_members = {
+            member
+            for member in target_members
+            if make_virtual_path(archive_path, member) not in _VIRTUAL_BYTE_CACHE
+        }
+    if not target_members:
+        return
+
+    with _open_tar_zst(archive_path) as archive:
+        for member in archive:
+            member_name = _normalize_member(member.name)
+            if not member.isfile() or member_name not in target_members:
+                continue
+            extracted = archive.extractfile(member)
+            if extracted is None:
+                continue
+            data = extracted.read()
+            with _CACHE_LOCK:
+                _VIRTUAL_BYTE_CACHE[make_virtual_path(archive_path, member_name)] = data
+            target_members.remove(member_name)
+            if not target_members:
+                break
+
+
+def _model_resource_members(model_member: str, model_json: dict) -> set[str]:
+    base_dir = posixpath.dirname(model_member)
+    members = set()
+
+    def add(path):
+        if isinstance(path, str) and path:
+            members.add(_join_member(base_dir, path))
+
+    add(model_json.get("model"))
+    for texture in model_json.get("textures", []) or []:
+        add(texture)
+    add(model_json.get("physics"))
+    add(model_json.get("pose"))
+
+    expressions = model_json.get("expressions", []) or []
+    if isinstance(expressions, list):
+        for expression in expressions:
+            if isinstance(expression, dict):
+                add(expression.get("file"))
+
+    motions = model_json.get("motions", {}) or {}
+    if isinstance(motions, dict):
+        for motion_group in motions.values():
+            if not isinstance(motion_group, list):
+                continue
+            for motion in motion_group:
+                if isinstance(motion, dict):
+                    add(motion.get("sound"))
+
+    return members
+
+
+def _join_member(base_dir: str, path: str) -> str:
+    normalized = str(path).replace("\\", "/")
+    if not normalized.startswith("/") and base_dir:
+        normalized = posixpath.join(base_dir, normalized)
+    return _normalize_member(normalized)
 
 
 def list_archive_files(archive_path: Path | str) -> list[str]:
@@ -81,4 +179,5 @@ def _normalize_member(path: str) -> str:
     normalized = str(path).replace("\\", "/")
     while normalized.startswith("./"):
         normalized = normalized[2:]
-    return normalized.lstrip("/")
+    normalized = posixpath.normpath(normalized.lstrip("/"))
+    return "" if normalized == "." else normalized

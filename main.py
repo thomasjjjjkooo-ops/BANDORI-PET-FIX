@@ -274,6 +274,7 @@ def main():
             program, arguments = process_program_and_args(BASE_DIR, "pet_process.py", [
                 "--character", model["character"],
                 "--costume", model["costume"],
+                "--model-path", model["path"],
                 "--index", str(idx),
             ])
             process.setProgram(program)

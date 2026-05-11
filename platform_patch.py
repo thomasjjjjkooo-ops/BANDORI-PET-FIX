@@ -11,6 +11,7 @@ MODELS_DIR = os.path.join(BASE_DIR, "models")
 _LIVE2D_TEXTURE_QUALITY = "balanced"
 _TEXTURE_MAX_ANISOTROPY_EXT = 0x84FE
 _MAX_TEXTURE_MAX_ANISOTROPY_EXT = 0x84FF
+_TEXTURE_DATA_CACHE = {}
 
 
 def set_live2d_texture_quality(profile: str):
@@ -118,16 +119,31 @@ class PatchedPlatformManager:
         return self._original.loadLive2DModel(path, version, disable_precision)
 
     def loadTexture(self, live2DModel, no, path):
-        if is_virtual_path(path):
-            image = Image.open(io.BytesIO(load_virtual_bytes(path)))
-        else:
-            image = Image.open(path)
-        if image.mode != "RGBA":
-            image = image.convert("RGBA")
-        image = _bleed_transparent_edges(image)
+        cache_key = self._texture_cache_key(path)
+        cached = _TEXTURE_DATA_CACHE.get(cache_key)
+        if cached is None:
+            if is_virtual_path(path):
+                source_image = Image.open(io.BytesIO(load_virtual_bytes(path)))
+            else:
+                source_image = Image.open(path)
+            image = source_image
+            try:
+                if image.mode != "RGBA":
+                    image = image.convert("RGBA")
+                elif _LIVE2D_TEXTURE_QUALITY in {"quality", "ultra"}:
+                    image = image.copy()
+                if _LIVE2D_TEXTURE_QUALITY in {"quality", "ultra"}:
+                    image = _bleed_transparent_edges(image)
+                width, height = image.size
+                cached = (width, height, image.tobytes())
+                _TEXTURE_DATA_CACHE[cache_key] = cached
+            finally:
+                if image is not source_image:
+                    image.close()
+                source_image.close()
+        width, height, image_data = cached
         min_filter, mag_filter, use_mipmap, anisotropy = _texture_options()
 
-        width, height = image.size
         texture = gl.glGenTextures(1)
         gl.glBindTexture(gl.GL_TEXTURE_2D, texture)
         gl.glPixelStorei(gl.GL_UNPACK_ALIGNMENT, 1)
@@ -140,7 +156,7 @@ class PatchedPlatformManager:
             0,
             gl.GL_RGBA,
             gl.GL_UNSIGNED_BYTE,
-            image.tobytes(),
+            image_data,
         )
         if use_mipmap:
             try:
@@ -154,6 +170,16 @@ class PatchedPlatformManager:
         _apply_anisotropy(anisotropy)
         gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
         live2DModel.setTexture(no, texture)
+
+    @staticmethod
+    def _texture_cache_key(path: str):
+        if is_virtual_path(path):
+            return (_LIVE2D_TEXTURE_QUALITY, path)
+        try:
+            stat = os.stat(path)
+            return (_LIVE2D_TEXTURE_QUALITY, os.path.abspath(path), stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            return (_LIVE2D_TEXTURE_QUALITY, os.path.abspath(path))
 
     def jsonParseFromBytes(self, path):
         return self._original.jsonParseFromBytes(path)
