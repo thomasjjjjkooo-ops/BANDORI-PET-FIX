@@ -7,18 +7,17 @@ import re
 
 from PySide6.QtCore import Qt, QPoint, QTimer, QPropertyAnimation, QEasingCurve, QProcess, QEvent
 from PySide6.QtGui import QColor, QIcon, QCursor, QMoveEvent, QResizeEvent
+from PySide6.QtNetwork import QLocalSocket
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QApplication, QSystemTrayIcon, QMenu, QStackedLayout,
 )
 
 from app_theme import apply_app_theme
 from i18n_manager import tr as _tr
-from action_bus import consume_actions
-from settings_bus import consume_settings
 from live2d_widget import Live2DWidget, normalize_live2d_quality
 from model_manager import ModelManager
 from pixel_pet_widget import PixelPetWidget, load_pixel_frames, pixel_path_for_character
-from process_utils import app_base_dir, process_program_and_args
+from process_utils import app_base_dir, ipc_server_name, process_program_and_args
 from radial_menu import RadialMenu
 
 
@@ -142,7 +141,6 @@ class PetWindow(QWidget):
         self._radial_menu = None
         self._chat_process = None
         self._settings_process = None
-        self._settings_stdout_buffer = ""
         self._entrance_anim = None
         self._pixel_frames = load_pixel_frames()
         self._pixel_mode = self._configured_pet_mode() == "pixel"
@@ -157,14 +155,15 @@ class PetWindow(QWidget):
         self._passthrough_timer = QTimer(self)
         self._passthrough_timer.setInterval(50)
         self._passthrough_timer.timeout.connect(self._update_mouse_passthrough)
-        self._action_bus_seen: set[str] = set()
-        self._action_bus_timer = QTimer(self)
-        self._action_bus_timer.setInterval(120)
-        self._action_bus_timer.timeout.connect(self._poll_action_bus)
-        self._settings_bus_seen: set[str] = set()
-        self._settings_bus_timer = QTimer(self)
-        self._settings_bus_timer.setInterval(200)
-        self._settings_bus_timer.timeout.connect(self._poll_settings_bus)
+        self._ipc_socket = QLocalSocket(self)
+        self._ipc_buffer = ""
+        self._ipc_reconnect_timer = QTimer(self)
+        self._ipc_reconnect_timer.setInterval(1000)
+        self._ipc_reconnect_timer.timeout.connect(self._connect_ipc_socket)
+        self._ipc_socket.connected.connect(self._on_ipc_connected)
+        self._ipc_socket.readyRead.connect(self._read_ipc_messages)
+        self._ipc_socket.disconnected.connect(self._schedule_ipc_reconnect)
+        self._ipc_socket.errorOccurred.connect(lambda _error: self._schedule_ipc_reconnect())
         self._position_save_timer = QTimer(self)
         self._position_save_timer.setSingleShot(True)
         self._position_save_timer.setInterval(250)
@@ -175,8 +174,7 @@ class PetWindow(QWidget):
             self._init_tray()
         self._load_initial_model()
         self._passthrough_timer.start()
-        self._action_bus_timer.start()
-        self._settings_bus_timer.start()
+        self._connect_ipc_socket()
         QApplication.instance().installEventFilter(self)
 
         self.setWindowOpacity(self._opacity)
@@ -549,7 +547,6 @@ class PetWindow(QWidget):
         process.setProgram(program)
         process.setArguments(arguments)
         process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
-        process.readyReadStandardOutput.connect(lambda p=process: self._read_chat_process_output(p))
         process.readyReadStandardError.connect(lambda p=process: self._read_chat_process_error(p))
         process.finished.connect(lambda *args, p=process: self._on_chat_process_finished(p))
         process.errorOccurred.connect(lambda _error, p=process: self._on_chat_process_finished(p))
@@ -567,13 +564,47 @@ class PetWindow(QWidget):
                 elif len(parts) == 2:
                     self._on_chat_action(parts[1])
 
-    def _poll_action_bus(self):
-        for action in consume_actions(self._current_char, self._action_bus_seen):
-            self._on_chat_action(action)
+    def _connect_ipc_socket(self):
+        if self._ipc_socket.state() != QLocalSocket.LocalSocketState.UnconnectedState:
+            return
+        self._ipc_socket.connectToServer(ipc_server_name())
 
-    def _poll_settings_bus(self):
-        for settings in consume_settings(self._settings_bus_seen):
-            self._apply_settings(settings)
+    def _schedule_ipc_reconnect(self):
+        if not self._ipc_reconnect_timer.isActive():
+            self._ipc_reconnect_timer.start()
+
+    def _on_ipc_connected(self):
+        self._ipc_reconnect_timer.stop()
+        self._ipc_socket.write(f"REGISTER\tPET\t{self._current_char}\n".encode("utf-8"))
+        self._ipc_socket.flush()
+
+    def _read_ipc_messages(self):
+        data = bytes(self._ipc_socket.readAll()).decode("utf-8", errors="replace")
+        buffer = self._ipc_buffer + data
+        lines = buffer.splitlines(keepends=True)
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            self._ipc_buffer = lines.pop()
+        else:
+            self._ipc_buffer = ""
+        for raw_line in lines:
+            self._handle_ipc_line(raw_line.rstrip("\r\n"))
+
+    def _handle_ipc_line(self, line: str):
+        if line.startswith("ACTION\t"):
+            parts = line.split("\t", 2)
+            if len(parts) == 3 and parts[1] == self._current_char:
+                self._on_chat_action(parts[2])
+            elif len(parts) == 2:
+                self._on_chat_action(parts[1])
+        elif line.startswith("SETTINGS\t"):
+            try:
+                if self._cfg:
+                    self._cfg.load()
+                self._apply_settings(json.loads(line.split("\t", 1)[1]))
+            except json.JSONDecodeError:
+                pass
+        elif line == "SHUTDOWN":
+            self.close()
 
     def _read_chat_process_error(self, process: QProcess):
         data = bytes(process.readAllStandardError()).decode("utf-8", errors="replace").strip()
@@ -991,35 +1022,10 @@ class PetWindow(QWidget):
         process.setProgram(program)
         process.setArguments(arguments)
         process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
-        process.readyReadStandardOutput.connect(lambda p=process: self._read_settings_process_output(p))
         process.readyReadStandardError.connect(lambda p=process: self._read_settings_process_error(p))
         process.finished.connect(lambda *args, p=process: self._on_settings_process_finished(p))
         self._settings_process = process
         process.start()
-
-    def _read_settings_process_output(self, process: QProcess):
-        data = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
-        buffer = self._settings_stdout_buffer + data
-        lines = buffer.splitlines(keepends=True)
-        if lines and not lines[-1].endswith(("\n", "\r")):
-            self._settings_stdout_buffer = lines.pop()
-        else:
-            self._settings_stdout_buffer = ""
-        for raw_line in lines:
-            self._handle_settings_process_line(raw_line.rstrip("\r\n"))
-
-    def _handle_settings_process_line(self, line: str):
-        if line.startswith("MODEL\t"):
-            parts = line.split("\t", 2)
-            if len(parts) == 3:
-                self._switch_model(parts[1], parts[2])
-        elif line.startswith("SETTINGS\t"):
-            try:
-                if self._cfg:
-                    self._cfg.load()
-                self._apply_settings(json.loads(line.split("\t", 1)[1]))
-            except json.JSONDecodeError:
-                pass
 
     def _read_settings_process_error(self, process: QProcess):
         data = bytes(process.readAllStandardError()).decode("utf-8", errors="replace").strip()
@@ -1028,12 +1034,7 @@ class PetWindow(QWidget):
 
     def _on_settings_process_finished(self, process: QProcess):
         if self._settings_process is process:
-            buffered = self._settings_stdout_buffer
-            if buffered:
-                for line in buffered.splitlines():
-                    self._handle_settings_process_line(line)
             self._settings_process = None
-            self._settings_stdout_buffer = ""
         process.deleteLater()
 
     def set_opacity(self, value: float):

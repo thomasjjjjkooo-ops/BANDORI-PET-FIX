@@ -1693,7 +1693,6 @@ class ChatWindow(QWidget):
 
     def emit_action_for_ipc(self, character: str, action: str):
         publish_action(character, action)
-        print(f"ACTION\t{character}\t{action}", flush=True)
 
     def _scroll_to_bottom(self):
         sb = self._scroll.verticalScrollBar()

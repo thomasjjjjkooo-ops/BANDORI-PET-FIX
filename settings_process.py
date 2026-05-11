@@ -2,11 +2,12 @@ import argparse
 import os
 import sys
 
-from process_utils import app_base_dir
+from process_utils import app_base_dir, ipc_server_name
 
 BASE_DIR = str(app_base_dir())
 
 from PySide6.QtCore import Qt
+from PySide6.QtNetwork import QLocalSocket
 from PySide6.QtWidgets import QApplication
 
 from config_manager import ConfigManager
@@ -45,6 +46,21 @@ def main():
 
     apply_app_theme(cfg.get("dark_theme", False))
 
+    ipc_socket = QLocalSocket(app)
+    ipc_socket.connectToServer(ipc_server_name())
+
+    def send_ipc_line(line: str):
+        if line.startswith("MODEL\t") and args.show_launch == "0":
+            line += "\tRELAUNCH"
+        if ipc_socket.state() == QLocalSocket.LocalSocketState.UnconnectedState:
+            ipc_socket.connectToServer(ipc_server_name())
+        if ipc_socket.state() != QLocalSocket.LocalSocketState.ConnectedState:
+            ipc_socket.waitForConnected(200)
+        if ipc_socket.state() == QLocalSocket.LocalSocketState.ConnectedState:
+            ipc_socket.write((line + "\n").encode("utf-8"))
+            ipc_socket.flush()
+            ipc_socket.waitForBytesWritten(200)
+
     mgr = ModelManager()
     window = SettingsWindow(
         mgr,
@@ -58,7 +74,7 @@ def main():
         vsync=args.vsync == "1",
         live2d_module=None,
     )
-    window.connect_ipc_output()
+    window.connect_ipc_output(send_ipc_line)
     window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
     screen = app.primaryScreen()

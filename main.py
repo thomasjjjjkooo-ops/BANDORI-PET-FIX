@@ -22,7 +22,6 @@ from live2d_widget import Live2DWidget
 from model_manager import ModelManager
 from config_manager import ConfigManager
 from i18n_manager import set_language, detect_system_language
-from settings_bus import publish_settings
 from app_theme import apply_app_theme
 
 
@@ -53,7 +52,7 @@ def main():
 
     mgr = ModelManager()
     pet_window_ref = {"processes": []}
-    ipc_ref = {"clients": []}
+    ipc_ref = {"clients": [], "buffers": {}}
 
     char = cfg.get("character", "")
     costume = cfg.get("costume", "")
@@ -95,6 +94,8 @@ def main():
             while server.hasPendingConnections():
                 socket = server.nextPendingConnection()
                 ipc_ref["clients"].append(socket)
+                ipc_ref["buffers"][socket] = ""
+                socket.readyRead.connect(lambda s=socket: read_ipc_client(s))
                 socket.disconnected.connect(lambda s=socket: remove_ipc_client(s))
 
         server.newConnection.connect(accept_clients)
@@ -105,8 +106,41 @@ def main():
         clients = ipc_ref.get("clients", [])
         if socket in clients:
             clients.remove(socket)
+        ipc_ref.get("buffers", {}).pop(socket, None)
         if isValid(socket):
             socket.deleteLater()
+
+    def write_ipc_line(socket, line: str):
+        if not isValid(socket) or not socket.isOpen():
+            return
+        socket.write((line + "\n").encode("utf-8"))
+        socket.flush()
+
+    def broadcast_ipc_line(line: str):
+        for socket in list(ipc_ref.get("clients", [])):
+            write_ipc_line(socket, line)
+
+    def read_ipc_client(socket):
+        if not isValid(socket):
+            return
+        data = bytes(socket.readAll()).decode("utf-8", errors="replace")
+        buffers = ipc_ref.setdefault("buffers", {})
+        buffer = buffers.get(socket, "") + data
+        lines = buffer.splitlines(keepends=True)
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            buffers[socket] = lines.pop()
+        else:
+            buffers[socket] = ""
+        for raw_line in lines:
+            handle_ipc_line(raw_line.rstrip("\r\n"))
+
+    def handle_ipc_line(line: str):
+        if line.startswith("ACTION\t"):
+            broadcast_ipc_line(line)
+        elif line.startswith("MODEL\t") or line.startswith("SETTINGS\t") or line == "LAUNCH":
+            handle_settings_line(line)
+            if line.startswith("SETTINGS\t"):
+                broadcast_ipc_line(line)
 
     def notify_chat_processes_shutdown():
         for socket in list(ipc_ref.get("clients", [])):
@@ -168,7 +202,7 @@ def main():
         process = settings_process_ref.get("process")
         if process is None or not isValid(process):
             settings_process_ref.pop("process", None)
-            settings_process_ref.pop("stdout_buffer", None)
+            settings_process_ref.pop("show_launch", None)
             return
         try:
             process.finished.disconnect()
@@ -183,7 +217,7 @@ def main():
                 if not process.waitForFinished(1000):
                     process.kill()
         settings_process_ref.pop("process", None)
-        settings_process_ref.pop("stdout_buffer", None)
+        settings_process_ref.pop("show_launch", None)
 
     def on_model_selected(selected_char, selected_costume, relaunch=False):
         nonlocal char, costume
@@ -209,7 +243,6 @@ def main():
         cfg.set("live2d_quality", pet_window_ref["live2d_quality"])
         cfg.set("live2d_scale", pet_window_ref["live2d_scale"])
         cfg.save()
-        publish_settings(data)
 
     def launch_pet():
         cfg.load()
@@ -266,24 +299,18 @@ def main():
 
     settings_process_ref = {}
 
-    def read_settings_output(process):
-        data = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
-        buffer = settings_process_ref.get("stdout_buffer", "") + data
-        lines = buffer.splitlines(keepends=True)
-        if lines and not lines[-1].endswith(("\n", "\r")):
-            settings_process_ref["stdout_buffer"] = lines.pop()
-        else:
-            settings_process_ref["stdout_buffer"] = ""
-        for raw_line in lines:
-            handle_settings_line(raw_line.rstrip("\r\n"))
-
     def handle_settings_line(line):
         if line.startswith("MODEL\t"):
-            parts = line.split("\t", 2)
-            if len(parts) == 3:
+            parts = line.split("\t")
+            if len(parts) >= 3:
+                relaunch = (
+                    parts[3] == "RELAUNCH"
+                    if len(parts) >= 4
+                    else not settings_process_ref.get("show_launch", True)
+                )
                 on_model_selected(
                     parts[1], parts[2],
-                    relaunch=not settings_process_ref.get("show_launch", True),
+                    relaunch=relaunch,
                 )
         elif line.startswith("SETTINGS\t"):
             try:
@@ -303,12 +330,8 @@ def main():
         if not isValid(process):
             return
         if settings_process_ref.get("process") is process:
-            buffered = settings_process_ref.get("stdout_buffer", "")
-            if buffered:
-                for line in buffered.splitlines():
-                    handle_settings_line(line)
             settings_process_ref.pop("process", None)
-            settings_process_ref.pop("stdout_buffer", None)
+            settings_process_ref.pop("show_launch", None)
         process.deleteLater()
 
     def launch_settings_process(show_launch=True):
@@ -329,7 +352,6 @@ def main():
         process.setProgram(program)
         process.setArguments(arguments)
         process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
-        process.readyReadStandardOutput.connect(lambda p=process: read_settings_output(p))
         process.readyReadStandardError.connect(lambda p=process: read_settings_error(p))
         process.finished.connect(lambda *args, p=process: clear_settings_process(p))
         settings_process_ref["process"] = process

@@ -2686,10 +2686,10 @@ class SettingsWindow(QWidget):
             self.launch_requested.emit()
         self.close()
 
-    def connect_ipc_output(self):
-        self.model_selected.connect(lambda char, costume: print(f"MODEL\t{char}\t{costume}", flush=True))
-        self.settings_changed.connect(lambda data: print(f"SETTINGS\t{json.dumps(data, ensure_ascii=False)}", flush=True))
-        self.launch_requested.connect(lambda: print("LAUNCH", flush=True))
+    def connect_ipc_output(self, send_line):
+        self.model_selected.connect(lambda char, costume: send_line(f"MODEL\t{char}\t{costume}"))
+        self.settings_changed.connect(lambda data: send_line(f"SETTINGS\t{json.dumps(data, ensure_ascii=False)}"))
+        self.launch_requested.connect(lambda: send_line("LAUNCH"))
 
 
 class TestConnectionWorker(QThread):
