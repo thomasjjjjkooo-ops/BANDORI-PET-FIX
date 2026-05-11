@@ -147,6 +147,7 @@ class PetWindow(QWidget):
         self._pixel_ready = False
         self._show_pos_set = False
         self._motion_guard_token = 0
+        self._expression_guard_token = 0
         self._mouse_passthrough = False
         # QOpenGLWidget alpha reads are not reliable during WM_NCHITTEST on
         # Windows 11; keep hit sampling on the Qt timer path.
@@ -695,6 +696,7 @@ class PetWindow(QWidget):
             if exp:
                 try:
                     model.SetExpression(exp)
+                    self._schedule_default_expression_restore()
                 except Exception:
                     pass
             return
@@ -702,7 +704,9 @@ class PetWindow(QWidget):
         mapped = tag_map.get(normalized, normalized)
 
         motion = _find_motion(mapped)
+        motion_started = False
         if motion:
+            self._expression_guard_token += 1
             try:
                 self._motion_guard_token += 1
                 token = self._motion_guard_token
@@ -712,6 +716,7 @@ class PetWindow(QWidget):
                     self._live2d.MotionPriority.FORCE,
                     onFinishMotionHandler=self._on_motion_finished,
                 )
+                motion_started = True
                 QTimer.singleShot(8000, lambda t=token: self._clear_motion_if_current(t))
                 QTimer.singleShot(1800, lambda t=token: self._restore_default_if_finished(t))
             except Exception:
@@ -722,6 +727,7 @@ class PetWindow(QWidget):
                         priority=self._live2d.MotionPriority.FORCE,
                         onFinishMotionHandler=self._on_motion_finished,
                     )
+                    motion_started = True
                     QTimer.singleShot(8000, lambda t=token: self._clear_motion_if_current(t))
                     QTimer.singleShot(1800, lambda t=token: self._restore_default_if_finished(t))
                 except Exception:
@@ -731,6 +737,8 @@ class PetWindow(QWidget):
         if exp:
             try:
                 model.SetExpression(exp)
+                if not motion_started:
+                    self._schedule_default_expression_restore()
             except Exception:
                 pass
 
@@ -742,6 +750,7 @@ class PetWindow(QWidget):
         if model is None:
             return
         try:
+            self._expression_guard_token += 1
             self._motion_guard_token += 1
             token = self._motion_guard_token
             model.StartRandomMotion(
@@ -811,10 +820,12 @@ class PetWindow(QWidget):
             try:
                 priority = self._live2d.MotionPriority.NORMAL if smooth else self._live2d.MotionPriority.FORCE
                 model.StartRandomMotion(configured_motion, priority=priority)
+                self._apply_default_expression(model)
                 return
             except Exception:
                 try:
                     model.StartMotion(configured_motion, 0, self._live2d.MotionPriority.FORCE)
+                    self._apply_default_expression(model)
                     return
                 except Exception:
                     pass
@@ -841,6 +852,22 @@ class PetWindow(QWidget):
                 model.ClearMotions()
             except Exception:
                 pass
+        self._apply_default_expression(model)
+
+    def _schedule_default_expression_restore(self, delay_ms: int = 3000):
+        self._expression_guard_token += 1
+        token = self._expression_guard_token
+        QTimer.singleShot(delay_ms, lambda t=token: self._restore_default_expression_if_current(t))
+
+    def _restore_default_expression_if_current(self, token: int):
+        if token != self._expression_guard_token:
+            return
+        model = self._live2d_widget.model
+        if model is None:
+            return
+        self._apply_default_expression(model)
+
+    def _apply_default_expression(self, model):
         try:
             if hasattr(model, "ResetExpression"):
                 model.ResetExpression()
