@@ -2,13 +2,13 @@ import argparse
 import os
 import sys
 
-from process_utils import app_base_dir
+from process_utils import app_base_dir, ipc_server_name
 
 from PySide6.QtCore import QRect, Qt
+from PySide6.QtNetwork import QLocalSocket
 from PySide6.QtWidgets import QApplication
 
-from qfluentwidgets import Theme, setTheme
-
+from app_theme import apply_app_theme
 from chat_window import ChatWindow
 from config_manager import ConfigManager
 from i18n_manager import current_language, detect_system_language, set_language
@@ -38,7 +38,7 @@ def main():
     app.setOrganizationName("BandoriPet")
     app.setQuitOnLastWindowClosed(True)
 
-    setTheme(Theme.DARK if cfg.get("dark_theme", False) else Theme.LIGHT)
+    apply_app_theme(cfg.get("dark_theme", False))
 
     mgr = ModelManager()
     models = cfg.get("models", [])
@@ -59,6 +59,17 @@ def main():
     window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
     window.closed.connect(lambda: cfg.set("language", current_language()))
     window.closed.connect(app.quit)
+
+    shutdown_socket = QLocalSocket(app)
+
+    def read_shutdown_messages():
+        for line in bytes(shutdown_socket.readAll()).decode("utf-8", errors="ignore").splitlines():
+            if line == "SHUTDOWN":
+                window.close()
+                break
+
+    shutdown_socket.readyRead.connect(read_shutdown_messages)
+    shutdown_socket.connectToServer(ipc_server_name())
 
     window.show()
     window.position_next_to_pet(QRect(args.pet_x, args.pet_y, args.pet_w, args.pet_h))

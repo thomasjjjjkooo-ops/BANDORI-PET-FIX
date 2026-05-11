@@ -2,8 +2,8 @@ import os
 import sys
 from datetime import datetime
 
-from PySide6.QtCore import Qt, Signal, QThread, QTimer, QPropertyAnimation, QEasingCurve, QVariantAnimation, QPoint, QEvent
-from PySide6.QtGui import QFont, QColor, QPalette, QPixmap, QIcon, QCursor, QPainter, QPainterPath, QPen, QBrush
+from PySide6.QtCore import Qt, Signal, QThread, QTimer, QPropertyAnimation, QEasingCurve, QVariantAnimation, QPoint, QEvent, QUrl
+from PySide6.QtGui import QFont, QColor, QPalette, QPixmap, QIcon, QCursor, QPainter, QPainterPath, QPen, QBrush, QIntValidator, QDesktopServices
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGridLayout,
     QPushButton, QSizePolicy, QSpacerItem, QScrollArea,
@@ -12,16 +12,30 @@ from PySide6.QtWidgets import (
 )
 
 from qfluentwidgets import (
-    CardWidget, PushButton, PrimaryPushButton,
+    CardWidget, PushButton, PrimaryPushButton, TransparentPushButton,
     BodyLabel, StrongBodyLabel, TitleLabel, SubtitleLabel,
-    FluentIcon, Slider, SwitchButton, ScrollArea, ComboBox,
-    setTheme, Theme, isDarkTheme, InfoBar, InfoBarPosition,
+    FluentIcon, Slider, SwitchButton, ScrollArea, ComboBox, LineEdit,
+    isDarkTheme, InfoBar, InfoBarPosition,
 )
 from qfluentwidgets.components.widgets.menu import LineEditMenu, TextEditMenu
 from qfluentwidgets.common.config import qconfig
 
 from i18n_manager import tr as _tr, set_language, available_languages, current_language
 from process_utils import app_base_dir
+from app_theme import (
+    BANDORI_PRIMARY,
+    BANDORI_PRIMARY_HOVER,
+    BANDORI_PRIMARY_PRESSED,
+    BANDORI_PRIMARY_DARK,
+    BANDORI_PRIMARY_DARK_HOVER,
+    BANDORI_PRIMARY_DARK_PRESSED,
+    BANDORI_PRIMARY_SOFT,
+    BANDORI_PRIMARY_SOFT_HOVER,
+    BANDORI_PRIMARY_SOFT_DARK,
+    BANDORI_PRIMARY_SOFT_DARK_HOVER,
+    accent_color,
+    apply_app_theme,
+)
 
 import json
 
@@ -29,6 +43,9 @@ from live2d_quality import normalize_live2d_quality
 
 _BG_LIGHT = "#ffffff"
 _BG_DARK = "#1e1e1e"
+
+LIVE2D_SCALE_MIN = 25
+LIVE2D_SCALE_MAX = 500
 
 _ROLEPLAY_STATUS_COLORS = {
     "green": "#2ecc71",
@@ -42,6 +59,9 @@ _ROLEPLAY_STATUS_TIPS = {
     "red": "尚未支持高级角色扮演",
 }
 
+PROJECT_REPO_URL = "https://github.com/HELPMEEADICE/BANDORI-PET-REV"
+PROJECT_LICENSE_URL = f"{PROJECT_REPO_URL}/blob/main/LICENSE"
+
 
 class FluentContextLineEdit(QLineEdit):
     def contextMenuEvent(self, event):
@@ -53,6 +73,18 @@ class FluentContextTextEdit(QTextEdit):
     def contextMenuEvent(self, event):
         menu = TextEditMenu(self)
         menu.exec(event.globalPos(), ani=True)
+
+
+def _clamp_live2d_scale(value) -> int:
+    try:
+        pct = int(round(float(value)))
+    except (TypeError, ValueError):
+        pct = 0
+    if pct <= 0:
+        screen = QApplication.primaryScreen()
+        ratio = screen.devicePixelRatio() if screen else 1.0
+        pct = int(round(ratio * 100))
+    return max(LIVE2D_SCALE_MIN, min(LIVE2D_SCALE_MAX, pct))
 
 
 class ModelListItem(QWidget):
@@ -99,9 +131,9 @@ class ModelListItem(QWidget):
 
     def _apply_theme(self):
         dark = isDarkTheme()
-        selected_bg = QColor("#263044" if dark else "#eef4ff")
+        selected_bg = QColor(BANDORI_PRIMARY_SOFT_DARK if dark else BANDORI_PRIMARY_SOFT)
         bg = self._qss_color(self._animated_bg) if self._animated_bg else self._qss_color(selected_bg) if self._current else "transparent"
-        hover = "#30384a" if dark else "#f1f6ff"
+        hover = BANDORI_PRIMARY_SOFT_DARK_HOVER if dark else BANDORI_PRIMARY_SOFT_HOVER
         text = "#f7f7fb" if dark else "#1f2328"
         muted = "#9aa5bd" if dark else "#657089"
         danger = "#ff6b6b" if dark else "#c42b1c"
@@ -129,9 +161,9 @@ class ModelListItem(QWidget):
 
     def _play_selected_animation(self):
         dark = isDarkTheme()
-        start = QColor("#263044" if dark else "#eef4ff")
+        start = QColor(BANDORI_PRIMARY_SOFT_DARK if dark else BANDORI_PRIMARY_SOFT)
         start.setAlpha(0)
-        end = QColor("#263044" if dark else "#eef4ff")
+        end = QColor(BANDORI_PRIMARY_SOFT_DARK if dark else BANDORI_PRIMARY_SOFT)
 
         anim = QVariantAnimation(self)
         anim.setDuration(220)
@@ -164,10 +196,10 @@ class AddModelListItem(QPushButton):
 
     def _apply_theme(self):
         dark = isDarkTheme()
-        border = "#3f8cff" if dark else "#2aabee"
-        bg = "#182638" if dark else "#eef7ff"
-        hover = "#21344d" if dark else "#e2f1ff"
-        text = "#8fd3ff" if dark else "#0067b8"
+        border = accent_color(dark)
+        bg = BANDORI_PRIMARY_SOFT_DARK if dark else BANDORI_PRIMARY_SOFT
+        hover = BANDORI_PRIMARY_SOFT_DARK_HOVER if dark else BANDORI_PRIMARY_SOFT_HOVER
+        text = BANDORI_PRIMARY_DARK if dark else BANDORI_PRIMARY
         self.setStyleSheet(f"""
             QPushButton {{
                 color: {text};
@@ -405,9 +437,9 @@ class CostumeItem(QPushButton):
         dark = isDarkTheme()
         bg = "#2d2d2d" if dark else "#fafafa"
         border = "#555555" if dark else "#e0e0e0"
-        hover_bg = "#3a3a3a" if dark else "#e8f0fe"
-        hover_border = "#60cdff" if dark else "#1a73e8"
-        checked_bg = "#60cdff" if dark else "#1a73e8"
+        hover_bg = BANDORI_PRIMARY_SOFT_DARK_HOVER if dark else BANDORI_PRIMARY_SOFT_HOVER
+        hover_border = accent_color(dark)
+        checked_bg = accent_color(dark)
         checked_fg = "#1a1a1a" if dark else "white"
         text_color = "#e0e0e0" if dark else "#333333"
         self.setStyleSheet(f"""
@@ -498,7 +530,8 @@ class Live2DPreviewBubble(QWidget):
 
         dark = isDarkTheme()
         bg = QColor(32, 32, 32, 255) if dark else QColor(255, 255, 255, 255)
-        border = QColor(96, 205, 255, 190) if dark else QColor(26, 115, 232, 165)
+        border = QColor(BANDORI_PRIMARY_DARK if dark else BANDORI_PRIMARY)
+        border.setAlpha(190 if dark else 165)
         shadow = QColor(0, 0, 0, 65) if dark else QColor(0, 0, 0, 38)
 
         rect = self.rect().adjusted(18, 2, -2, -2)
@@ -577,7 +610,7 @@ class NavButton(QPushButton):
         eff = self.graphicsEffect()
         if not isinstance(eff, QGraphicsColorizeEffect):
             eff = QGraphicsColorizeEffect(self)
-            eff.setColor(QColor(96, 205, 255))
+            eff.setColor(QColor(BANDORI_PRIMARY_DARK))
             eff.setStrength(0.0)
             self.setGraphicsEffect(eff)
         if hasattr(self, '_hover_anim'):
@@ -594,11 +627,11 @@ class NavButton(QPushButton):
     def _update_stylesheet(self):
         dark = isDarkTheme()
         bg = "#2a2a2a" if dark else "#fafafa"
-        hover_bg = "#3a3a3a" if dark else "#e0e7f0"
-        checked_bg = "#3a3a5a" if dark else "#d1e4ff"
-        checked_border = "#60cdff"
+        hover_bg = "#3a3a3a" if dark else "#f3e3e9"
+        checked_bg = BANDORI_PRIMARY_SOFT_DARK if dark else BANDORI_PRIMARY_SOFT
+        checked_border = accent_color(dark)
         text_color = "#e0e0e0" if dark else "#2a2a2a"
-        checked_text = "#ffffff" if dark else "#0d5ec9"
+        checked_text = BANDORI_PRIMARY_DARK if dark else BANDORI_PRIMARY
         border = "1px solid transparent" if dark else "1px solid #e0e0e0"
         self.setStyleSheet(f"""
             QPushButton {{
@@ -671,6 +704,9 @@ class SettingsWindow(QWidget):
         self._vsync = vsync
         self._live2d_quality = normalize_live2d_quality(
             self._cfg.get("live2d_quality", "balanced") if self._cfg else "balanced"
+        )
+        self._live2d_scale = _clamp_live2d_scale(
+            self._cfg.get("live2d_scale", 0) if self._cfg else 0
         )
         self._saved_user_name = ""
 
@@ -899,6 +935,29 @@ class SettingsWindow(QWidget):
 
         self._pages["characters"] = self._char_page
         self._pages["costumes"] = self._costume_page
+        self._pov_page = self._build_pov_page()
+        self._llm_page = self._build_llm_page()
+        self._quality_page = self._build_quality_page()
+        self._about_page = self._build_about_page()
+        self._costume_page.hide()
+        self._llm_page.hide()
+        self._pov_page.hide()
+        self._quality_page.hide()
+        self._about_page.hide()
+
+        self._page_stack_layout.addWidget(self._char_page)
+        self._page_stack_layout.addWidget(self._costume_page)
+        self._page_stack_layout.addWidget(self._llm_page)
+        self._page_stack_layout.addWidget(self._pov_page)
+        self._page_stack_layout.addWidget(self._quality_page)
+        self._page_stack_layout.addWidget(self._about_page)
+
+        self._pages["characters"] = self._char_page
+        self._pages["costumes"] = self._costume_page
+        self._pages["llm"] = self._llm_page
+        self._pages["pov"] = self._pov_page
+        self._pages["quality"] = self._quality_page
+        self._pages["about"] = self._about_page
 
         page_scroll = ScrollArea()
         page_scroll.setWidgetResizable(True)
@@ -983,6 +1042,11 @@ class SettingsWindow(QWidget):
 
         layout.addStretch()
 
+        btn_about = NavButton("about", FluentIcon.INFO, _tr("SettingsWindow.nav_about"), sidebar)
+        btn_about.nav_activated.connect(self._on_nav_selected)
+        self._nav_buttons["about"] = btn_about
+        layout.addWidget(btn_about)
+
         self._update_sidebar_style()
         self._theme_widgets.append(sidebar)
         qconfig.themeChanged.connect(self._update_sidebar_style)
@@ -990,7 +1054,7 @@ class SettingsWindow(QWidget):
         self._nav_indicator = QWidget(sidebar)
         self._nav_indicator.setFixedSize(4, 28)
         self._nav_indicator.setStyleSheet(f"""
-            background: #60cdff;
+            background: {BANDORI_PRIMARY};
             border-radius: 2px;
         """)
         self._nav_indicator.hide()
@@ -1172,14 +1236,14 @@ class SettingsWindow(QWidget):
         self._switch_model_btn.setStyleSheet(f"""
             QPushButton {{
                 color: #ffffff;
-                background: {'#0078d4' if not dark else '#4cc2ff'};
-                border: 1px solid {'#60cdff' if dark else '#60a5fa'};
+                background: {BANDORI_PRIMARY if not dark else BANDORI_PRIMARY_DARK};
+                border: 1px solid {accent_color(dark)};
                 border-radius: 84px;
                 font-size: 18px;
                 font-weight: 700;
             }}
-            QPushButton:hover {{ background: {'#106ebe' if not dark else '#76d6ff'}; }}
-            QPushButton:pressed {{ background: {'#005a9e' if not dark else '#189cd8'}; }}
+            QPushButton:hover {{ background: {BANDORI_PRIMARY_HOVER if not dark else BANDORI_PRIMARY_DARK_HOVER}; }}
+            QPushButton:pressed {{ background: {BANDORI_PRIMARY_PRESSED if not dark else BANDORI_PRIMARY_DARK_PRESSED}; }}
         """)
 
     def _show_model_detail(self):
@@ -1532,7 +1596,7 @@ class SettingsWindow(QWidget):
         avatar_label = BodyLabel(_tr("SettingsWindow.llm_avatar_color"), page)
         layout.addWidget(avatar_label)
         self._avatar_colors = [
-            ("#2aabee", _tr("color.blue")),
+            (BANDORI_PRIMARY, "Bandori"),
             ("#e91e63", _tr("color.pink")),
             ("#9c27b0", _tr("color.purple")),
             ("#4caf50", _tr("color.green")),
@@ -1643,8 +1707,95 @@ class SettingsWindow(QWidget):
         self._quality_detail.setWordWrap(True)
         layout.addWidget(self._quality_detail)
 
+        scale_label = BodyLabel(_tr("SettingsWindow.live2d_scale"), page)
+        layout.addWidget(scale_label)
+
+        scale_row = QHBoxLayout()
+        scale_row.setContentsMargins(0, 0, 0, 0)
+        scale_row.setSpacing(10)
+        self._live2d_scale_slider = Slider(Qt.Orientation.Horizontal, page)
+        self._live2d_scale_slider.setRange(LIVE2D_SCALE_MIN, LIVE2D_SCALE_MAX)
+        self._live2d_scale_slider.setValue(self._live2d_scale)
+        self._live2d_scale_slider.setSingleStep(5)
+        self._live2d_scale_input = LineEdit(page)
+        self._live2d_scale_input.setFixedWidth(76)
+        self._live2d_scale_input.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._live2d_scale_input.setValidator(QIntValidator(LIVE2D_SCALE_MIN, LIVE2D_SCALE_MAX, self))
+        self._live2d_scale_input.setText(str(self._live2d_scale))
+        self._live2d_scale_slider.valueChanged.connect(self._on_live2d_scale_slider_changed)
+        self._live2d_scale_input.editingFinished.connect(self._on_live2d_scale_input_finished)
+        scale_row.addWidget(self._live2d_scale_slider, 1)
+        scale_row.addWidget(self._live2d_scale_input)
+        layout.addLayout(scale_row)
+
         layout.addStretch()
         return page
+
+    def _build_about_page(self):
+        page = self._make_theme_widget(QWidget())
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
+
+        title = TitleLabel(_tr("SettingsWindow.about_title"), page)
+        layout.addWidget(title)
+
+        subtitle = SubtitleLabel(_tr("SettingsWindow.about_subtitle"), page)
+        subtitle.setWordWrap(True)
+        layout.addWidget(subtitle)
+
+        desc = BodyLabel(_tr("SettingsWindow.about_desc"), page)
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        license_label = BodyLabel(_tr("SettingsWindow.about_license"), page)
+        license_label.setWordWrap(True)
+        layout.addWidget(license_label)
+
+        disclaimer = BodyLabel(_tr("SettingsWindow.about_disclaimer"), page)
+        disclaimer.setWordWrap(True)
+        layout.addWidget(disclaimer)
+
+        link_label = QLabel(
+            _tr(
+                "SettingsWindow.about_links",
+                repo=PROJECT_REPO_URL,
+                license=PROJECT_LICENSE_URL,
+            ),
+            page,
+        )
+        link_label.setWordWrap(True)
+        link_label.setTextFormat(Qt.TextFormat.RichText)
+        link_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        link_label.setOpenExternalLinks(True)
+        self._style_about_link(link_label)
+        qconfig.themeChanged.connect(lambda: self._style_about_link(link_label))
+        layout.addWidget(link_label)
+
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(0, 2, 0, 0)
+        btn_row.setSpacing(10)
+        repo_btn = TransparentPushButton(FluentIcon.GITHUB, _tr("SettingsWindow.about_open_repo"), page)
+        repo_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(PROJECT_REPO_URL)))
+        license_btn = TransparentPushButton(FluentIcon.HELP, _tr("SettingsWindow.about_open_license"), page)
+        license_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(PROJECT_LICENSE_URL)))
+        btn_row.addWidget(repo_btn)
+        btn_row.addWidget(license_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        tech = BodyLabel(_tr("SettingsWindow.about_tech"), page)
+        tech.setWordWrap(True)
+        layout.addWidget(tech)
+
+        layout.addStretch()
+        return page
+
+    @staticmethod
+    def _style_about_link(label: QLabel):
+        color = BANDORI_PRIMARY_DARK if isDarkTheme() else BANDORI_PRIMARY
+        text = "#dcdcdc" if isDarkTheme() else "#303030"
+        label.setStyleSheet(f"QLabel {{ color: {text}; font-size: 13px; }} QLabel a {{ color: {color}; }}")
 
     def _on_quality_changed(self, index: int):
         profile = self._quality_combo.itemData(index)
@@ -1668,6 +1819,19 @@ class SettingsWindow(QWidget):
                 "_avatar_color_btns",
             )
         )
+    def _set_live2d_scale_controls(self, value: int):
+        value = _clamp_live2d_scale(value)
+        self._live2d_scale = value
+        self._live2d_scale_input.blockSignals(True)
+        self._live2d_scale_slider.setValue(value)
+        self._live2d_scale_input.setText(str(value))
+        self._live2d_scale_input.blockSignals(False)
+
+    def _on_live2d_scale_slider_changed(self, value: int):
+        self._set_live2d_scale_controls(value)
+
+    def _on_live2d_scale_input_finished(self):
+        self._set_live2d_scale_controls(self._live2d_scale_input.text())
 
     def _style_llm_inputs(self):
         if not self._llm_config_widgets_ready():
@@ -1686,7 +1850,7 @@ class SettingsWindow(QWidget):
                 font-size: 13px;
             }}
             QLineEdit:focus {{
-                border-color: #60cdff;
+                border-color: {BANDORI_PRIMARY_DARK if dark else BANDORI_PRIMARY};
             }}
             QTextEdit {{
                 background: {input_bg};
@@ -1697,7 +1861,7 @@ class SettingsWindow(QWidget):
                 font-size: 13px;
             }}
             QTextEdit:focus {{
-                border-color: #60cdff;
+                border-color: {BANDORI_PRIMARY_DARK if dark else BANDORI_PRIMARY};
             }}
         """
         self._llm_api_url.setStyleSheet(style)
@@ -1756,7 +1920,7 @@ class SettingsWindow(QWidget):
             self._llm_aux_model_id.setText(self._cfg.get("llm_aux_model_id", ""))
             self._saved_user_name = self._cfg.get("user_name", "")
             self._user_name.setText(self._saved_user_name)
-            saved_color = self._cfg.get("user_avatar_color", "#2aabee")
+            saved_color = self._cfg.get("user_avatar_color", BANDORI_PRIMARY)
             for btn in self._avatar_color_btns:
                 btn.setChecked(btn.property("avatar_color") == saved_color)
             thinking_val = self._cfg.get("llm_enable_thinking", None)
@@ -2010,7 +2174,7 @@ class SettingsWindow(QWidget):
                     color: {'#e8e8e8' if dark else '#333333'};
                 }}
                 QPushButton:hover {{
-                    background: {'#3a3a5a' if dark else '#e8f0fe'};
+                    background: {BANDORI_PRIMARY_SOFT_DARK_HOVER if dark else BANDORI_PRIMARY_SOFT_HOVER};
                 }}
             """)
             btn.clicked.connect(lambda checked, mn=model_name: self._set_fetched_model_id(mn))
@@ -2080,7 +2244,7 @@ class SettingsWindow(QWidget):
         self._theme_switch = SwitchButton(panel)
         self._theme_switch.setChecked(isDarkTheme())
         self._theme_switch.checkedChanged.connect(
-            lambda v: setTheme(Theme.DARK if v else Theme.LIGHT)
+            lambda v: apply_app_theme(v)
         )
         theme_row = QHBoxLayout()
         theme_row.addWidget(theme_label)
@@ -2398,6 +2562,7 @@ class SettingsWindow(QWidget):
             "dark_theme": self._theme_switch.isChecked(),
             "vsync": self._vsync_switch.isChecked(),
             "live2d_quality": self._live2d_quality,
+            "live2d_scale": self._live2d_scale,
         }
         if self._cfg:
             self._cfg.set("fps", settings["fps"])
@@ -2405,6 +2570,7 @@ class SettingsWindow(QWidget):
             self._cfg.set("dark_theme", settings["dark_theme"])
             self._cfg.set("vsync", settings["vsync"])
             self._cfg.set("live2d_quality", settings["live2d_quality"])
+            self._cfg.set("live2d_scale", settings["live2d_scale"])
             self._cfg.save()
         if self._current_char and self._selected_costume:
             self.model_selected.emit(self._current_char, self._selected_costume)
