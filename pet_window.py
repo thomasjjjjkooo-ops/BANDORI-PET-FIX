@@ -304,7 +304,7 @@ class PetWindow(QWidget):
     def _is_interaction_hit(self, global_pos: QPoint) -> bool:
         if self._pixel_mode:
             return self._pixel_widget.is_sprite_hit_at_global(global_pos)
-        return self._live2d_widget.is_model_hit_at_global(global_pos)
+        return self._live2d_widget.model_hit_state_at_global(global_pos)
 
     def _update_mouse_passthrough(self):
         if os.name != "nt" or self._use_native_hit_test_passthrough or not self.isVisible():
@@ -316,6 +316,9 @@ class PetWindow(QWidget):
             self._set_mouse_passthrough(False)
             return
         hit = self._is_interaction_hit(global_pos)
+        if hit is None:
+            self._set_mouse_passthrough(False)
+            return
         self._set_mouse_passthrough(not hit)
 
     def set_fps(self, fps: int):

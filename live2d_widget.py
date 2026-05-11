@@ -1,24 +1,11 @@
 import math
 import ctypes
 import OpenGL.GL as gl
-from PySide6.QtCore import Qt, QTimerEvent, QPoint, QElapsedTimer, Signal
+from PySide6.QtCore import Qt, QPoint, QElapsedTimer, Signal
 from PySide6.QtGui import QMouseEvent, QCursor, QGuiApplication, QSurfaceFormat, QOpenGLContext, QMoveEvent, QResizeEvent
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from live2d_quality import LIVE2D_QUALITY_PROFILES, normalize_live2d_quality
 from platform_patch import set_live2d_texture_quality
-
-
-def _get_display_refresh():
-    try:
-        screen = QGuiApplication.primaryScreen()
-        if screen:
-            rr = screen.refreshRate()
-            if rr > 0:
-                return rr
-    except Exception:
-        pass
-    return 60
-
 
 class Live2DWidget(QOpenGLWidget):
     model_loaded = Signal()
@@ -37,7 +24,7 @@ class Live2DWidget(QOpenGLWidget):
         fmt.setSamples(0)
         fmt.setDepthBufferSize(0)
         fmt.setStencilBufferSize(8)
-        fmt.setSwapInterval(0)
+        fmt.setSwapInterval(1)
         fmt.setVersion(2, 1)
         fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CompatibilityProfile)
         QSurfaceFormat.setDefaultFormat(fmt)
@@ -62,7 +49,6 @@ class Live2DWidget(QOpenGLWidget):
         
         self._fps = 120
         self._vsync = True
-        self._timer_id = None
         self._static_render = False
         self._static_render_done = False
         self._clear_color = (0.0, 0.0, 0.0, 0.0)
@@ -72,9 +58,13 @@ class Live2DWidget(QOpenGLWidget):
             (-3, 0), (3, 0), (0, -3), (0, 3),
             (-6, 0), (6, 0), (0, -6), (0, 6),
         )
-        self._hit_framebuffer_image = None
-        self._hit_framebuffer_time = -10000
-        self._hit_framebuffer_ttl_ms = 33
+        self._hit_alpha_cache = {}
+        self._hit_alpha_cache_ttl_ms = 100
+        self._hit_pbo_ids = []
+        self._hit_pbo_next = 0
+        self._hit_pbo_pending = []
+        self._hit_pbo_supported = None
+        self._hit_pbo_size = 4
         self._hit_clock = QElapsedTimer()
         self._hit_clock.start()
 
@@ -91,9 +81,6 @@ class Live2DWidget(QOpenGLWidget):
         self._last_cursor_y = -1
         self._head_track_counter = 0
 
-        # 极限优化：预分配底层 C 内存
-        self._pixel_buf = (ctypes.c_ubyte * 4)()
-
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
@@ -104,29 +91,11 @@ class Live2DWidget(QOpenGLWidget):
         if QOpenGLContext.currentContext() != self.context():
             self.makeCurrent()
 
-    def _effective_fps(self):
-        if self._vsync:
-            return _get_display_refresh()
-        return max(10, self._fps)
-
-    def _restart_timer(self):
-        if self._timer_id is not None:
-            self.killTimer(self._timer_id)
-        target_ms = max(1, int(1000.0 / self._effective_fps()) - 1)
-        self._timer_id = self.startTimer(target_ms, Qt.TimerType.PreciseTimer)
-
     def set_fps(self, fps: int):
         self._fps = max(10, min(fps, 240))
-        refresh = _get_display_refresh()
-        if self._vsync and self._fps > refresh:
-            self._vsync = False
-        if self._timer_id is not None:
-            self._restart_timer()
 
     def set_vsync(self, enabled: bool):
         self._vsync = enabled
-        if self._vsync and self._fps > _get_display_refresh():
-            self._vsync = False
         if not self._initialized_gl:
             return
         self._safe_make_current()
@@ -135,7 +104,8 @@ class Live2DWidget(QOpenGLWidget):
             wglSwapIntervalEXT(1 if self._vsync else 0)
         except Exception:
             pass
-        self._restart_timer()
+        if not self._static_render:
+            self.update()
 
     def set_render_quality(self, profile: str):
         profile = normalize_live2d_quality(profile)
@@ -149,9 +119,7 @@ class Live2DWidget(QOpenGLWidget):
     def set_static_render(self, enabled: bool):
         self._static_render = enabled
         self._static_render_done = False
-        if enabled and self._timer_id is not None:
-            self.killTimer(self._timer_id)
-            self._timer_id = None
+        self.update()
 
     def set_clear_color(self, r: float, g: float, b: float, a: float):
         self._clear_color = (r, g, b, a)
@@ -179,8 +147,7 @@ class Live2DWidget(QOpenGLWidget):
         self._clear_hit_framebuffer_cache()
         if self._initialized_gl:
             self._load_model_internal(model_json_path)
-            if self._static_render:
-                self.update()
+            self.update()
 
     def _load_model_internal(self, model_json_path: str):
         if not model_json_path or not self._live2d:
@@ -237,10 +204,8 @@ class Live2DWidget(QOpenGLWidget):
 
         if self._pending_model:
             self._load_model_internal(self._pending_model)
-        if not self._static_render:
-            self._restart_timer()
-        else:
-            self.update()
+        self._init_hit_pbos()
+        self.update()
 
     def resizeGL(self, w: int, h: int):
         self._clear_hit_framebuffer_cache()
@@ -249,7 +214,6 @@ class Live2DWidget(QOpenGLWidget):
             self._model.Resize(w, h)
 
     def paintGL(self):
-        self._clear_hit_framebuffer_cache()
         if self._static_render and self._static_render_done:
             return
 
@@ -274,18 +238,15 @@ class Live2DWidget(QOpenGLWidget):
         self._live2d.clearBuffer()
         gl.glClearColor(*self._clear_color)
         gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_STENCIL_BUFFER_BIT)
+        self._update_head_tracking(model)
         model.Update()
         model.Draw()
         if self._static_render:
             self._static_render_done = True
+        elif self.isVisible():
+            self.update()
 
-    def timerEvent(self, event: QTimerEvent):
-        if self._static_render:
-            return
-        if not self.isVisible():
-            return
-
-        model = self._model
+    def _update_head_tracking(self, model):
         if not self._dragging and model is not None:
             self._head_track_counter += 1
             if self._head_track_counter >= 3:
@@ -317,8 +278,6 @@ class Live2DWidget(QOpenGLWidget):
                         local_x = cx + ux * max_dist - self._cache_global_x
                         local_y = cy + uy * max_dist - self._cache_global_y
                         model.Drag(local_x, local_y)
-
-        self.update()
 
     def mousePressEvent(self, event: QMouseEvent):
         if self._drag_locked:
@@ -364,7 +323,10 @@ class Live2DWidget(QOpenGLWidget):
         local = self.mapFromGlobal(global_pos)
         if not self.rect().contains(local):
             return 0
-        return self._get_alpha_fast(local.x(), local.y())
+        if not self._is_in_model_hit_area(local.x(), local.y()):
+            return 0
+        alpha = self._get_alpha_fast(local.x(), local.y())
+        return 0 if alpha is None else alpha
 
     def is_model_hit_at_global(self, global_pos: QPoint) -> bool:
         local = self.mapFromGlobal(global_pos)
@@ -372,61 +334,228 @@ class Live2DWidget(QOpenGLWidget):
             return False
         return self._is_model_hit_at(local.x(), local.y())
 
+    def model_hit_state_at_global(self, global_pos: QPoint):
+        local = self.mapFromGlobal(global_pos)
+        if not self.rect().contains(local):
+            return False
+        return self._hit_state_at(local.x(), local.y())
+
     def _is_model_hit_at(self, x: float, y: float) -> bool:
         if not self._model:
             return False
-        return self._alpha_near(x, y) > self._hit_alpha_threshold
+        state = self._hit_state_at(x, y)
+        return state is True
+
+    def _hit_state_at(self, x: float, y: float):
+        if not self._model or not self._is_in_model_hit_area(x, y):
+            return False
+        alpha = self._alpha_near(x, y)
+        if alpha is None:
+            return None
+        return alpha > self._hit_alpha_threshold
+
+    def _is_in_model_hit_area(self, x: float, y: float) -> bool:
+        return self._is_in_sdk_hit_area(x, y) or self._is_in_custom_hit_area(x, y)
+
+    def _is_in_sdk_hit_area(self, x: float, y: float) -> bool:
+        model = self._model
+        try:
+            setting = getattr(model, "modelSetting", None)
+            if setting is None or setting.getHitAreaNum() <= 0:
+                return False
+            return model.HitTest("", x, y) is not None
+        except Exception:
+            return False
+
+    def _is_in_custom_hit_area(self, x: float, y: float) -> bool:
+        model = self._model
+        try:
+            setting = getattr(model, "modelSetting", None)
+            config = getattr(setting, "json", {}) if setting is not None else {}
+            areas = config.get("hit_areas_custom") or {}
+            if not areas:
+                return False
+            sx, sy = model.matrixManager.screenToScene(x, y)
+            for name, x_range in areas.items():
+                if not name.endswith("_x") or not isinstance(x_range, list) or len(x_range) != 2:
+                    continue
+                y_range = areas.get(f"{name[:-2]}_y")
+                if not isinstance(y_range, list) or len(y_range) != 2:
+                    continue
+                min_x, max_x = sorted((float(x_range[0]), float(x_range[1])))
+                min_y, max_y = sorted((float(y_range[0]), float(y_range[1])))
+                if min_x <= sx <= max_x and min_y <= sy <= max_y:
+                    return True
+        except Exception:
+            return False
+        return False
 
     def _clear_hit_framebuffer_cache(self):
-        self._hit_framebuffer_image = None
-        self._hit_framebuffer_time = -10000
+        self._hit_alpha_cache.clear()
+        self._clear_pending_hit_pbos()
 
-    def _alpha_near(self, x: float, y: float) -> int:
+    def _init_hit_pbos(self):
+        if self._hit_pbo_supported is not None:
+            return
+        try:
+            if not all(
+                hasattr(gl, name)
+                for name in (
+                    "glGenBuffers", "glBindBuffer", "glBufferData", "glFenceSync",
+                    "glClientWaitSync", "glDeleteSync", "glMapBuffer", "glUnmapBuffer",
+                )
+            ):
+                raise RuntimeError("PBO sync functions are unavailable")
+            self._hit_pbo_ids = []
+            for _ in self._hit_probe_offsets:
+                pbo = gl.glGenBuffers(1)
+                if isinstance(pbo, (list, tuple)):
+                    pbo = pbo[0]
+                self._hit_pbo_ids.append(int(pbo))
+                gl.glBindBuffer(gl.GL_PIXEL_PACK_BUFFER, int(pbo))
+                gl.glBufferData(gl.GL_PIXEL_PACK_BUFFER, self._hit_pbo_size, None, gl.GL_STREAM_READ)
+            gl.glBindBuffer(gl.GL_PIXEL_PACK_BUFFER, 0)
+            self._hit_pbo_supported = True
+        except Exception:
+            try:
+                gl.glBindBuffer(gl.GL_PIXEL_PACK_BUFFER, 0)
+            except Exception:
+                pass
+            self._hit_pbo_ids = []
+            self._hit_pbo_pending = []
+            self._hit_pbo_supported = False
+
+    def _clear_pending_hit_pbos(self):
+        if not self._hit_pbo_pending:
+            return
+        pending = self._hit_pbo_pending
+        self._hit_pbo_pending = []
+        for request in pending:
+            fence = request.get("fence")
+            if fence:
+                try:
+                    gl.glDeleteSync(fence)
+                except Exception:
+                    pass
+
+    def _process_hit_pbo_results(self):
+        if not self._hit_pbo_supported or not self._hit_pbo_pending:
+            return
+        ready = []
+        still_pending = []
+        for request in self._hit_pbo_pending:
+            fence = request.get("fence")
+            try:
+                status = gl.glClientWaitSync(fence, 0, 0)
+            except Exception:
+                still_pending.append(request)
+                continue
+            if status in (gl.GL_ALREADY_SIGNALED, gl.GL_CONDITION_SATISFIED):
+                ready.append(request)
+            else:
+                still_pending.append(request)
+        self._hit_pbo_pending = still_pending
+
+        now = self._hit_clock.elapsed()
+        for request in ready:
+            fence = request.get("fence")
+            try:
+                gl.glBindBuffer(gl.GL_PIXEL_PACK_BUFFER, request["pbo"])
+                ptr = gl.glMapBuffer(gl.GL_PIXEL_PACK_BUFFER, gl.GL_READ_ONLY)
+                if ptr:
+                    data = ctypes.string_at(ptr, self._hit_pbo_size)
+                    self._hit_alpha_cache[request["key"]] = (data[3], now)
+                    gl.glUnmapBuffer(gl.GL_PIXEL_PACK_BUFFER)
+            except Exception:
+                pass
+            finally:
+                try:
+                    gl.glBindBuffer(gl.GL_PIXEL_PACK_BUFFER, 0)
+                except Exception:
+                    pass
+                if fence:
+                    try:
+                        gl.glDeleteSync(fence)
+                    except Exception:
+                        pass
+        if len(self._hit_alpha_cache) > 128:
+            expired = [
+                key for key, (_, timestamp) in self._hit_alpha_cache.items()
+                if now - timestamp > self._hit_alpha_cache_ttl_ms
+            ]
+            for key in expired:
+                self._hit_alpha_cache.pop(key, None)
+
+    def _queue_hit_pbo_read(self, key: tuple[int, int], sx: int, sy: int):
+        if not self._hit_pbo_supported or not self._hit_pbo_ids:
+            return
+        if any(request["key"] == key for request in self._hit_pbo_pending):
+            return
+        if len(self._hit_pbo_pending) >= len(self._hit_pbo_ids):
+            return
+        pending_pbos = {request["pbo"] for request in self._hit_pbo_pending}
+        pbo = None
+        for _ in self._hit_pbo_ids:
+            candidate = self._hit_pbo_ids[self._hit_pbo_next]
+            self._hit_pbo_next = (self._hit_pbo_next + 1) % len(self._hit_pbo_ids)
+            if candidate not in pending_pbos:
+                pbo = candidate
+                break
+        if pbo is None:
+            return
+        try:
+            gl.glBindBuffer(gl.GL_PIXEL_PACK_BUFFER, pbo)
+            gl.glReadPixels(sx, sy, 1, 1, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, ctypes.c_void_p(0))
+            fence = gl.glFenceSync(gl.GL_SYNC_GPU_COMMANDS_COMPLETE, 0)
+            if not fence:
+                raise RuntimeError("PBO fence creation failed")
+            self._hit_pbo_pending.append({"pbo": pbo, "key": key, "fence": fence})
+        except Exception:
+            self._hit_pbo_supported = False
+            self._clear_pending_hit_pbos()
+        finally:
+            try:
+                gl.glBindBuffer(gl.GL_PIXEL_PACK_BUFFER, 0)
+            except Exception:
+                pass
+
+    def _alpha_near(self, x: float, y: float):
         alpha = 0
+        known = False
         for dx, dy in self._hit_probe_offsets:
             px = x + dx
             py = y + dy
-            alpha = max(alpha, self._get_alpha_fast(px, py))
-            if alpha <= self._hit_alpha_threshold:
-                alpha = max(alpha, self._get_alpha_from_framebuffer(px, py))
+            sample_alpha = self._get_alpha_fast(px, py)
+            if sample_alpha is None:
+                continue
+            known = True
+            alpha = max(alpha, sample_alpha)
             if alpha > self._hit_alpha_threshold:
                 break
+        if not known:
+            return None
         return alpha
 
-    def _get_alpha_from_framebuffer(self, x: float, y: float) -> int:
-        if x < 0 or y < 0 or x >= self._cache_w or y >= self._cache_h:
-            return 0
-        try:
-            now = self._hit_clock.elapsed()
-            if (
-                self._hit_framebuffer_image is None
-                or now - self._hit_framebuffer_time > self._hit_framebuffer_ttl_ms
-            ):
-                self._hit_framebuffer_image = self.grabFramebuffer()
-                self._hit_framebuffer_time = now
-            image = self._hit_framebuffer_image
-            if image is None or image.isNull():
-                return 0
-            scale_x = image.width() / max(1, self._cache_w)
-            scale_y = image.height() / max(1, self._cache_h)
-            ix = max(0, min(image.width() - 1, int(x * scale_x)))
-            iy = max(0, min(image.height() - 1, int(y * scale_y)))
-            return image.pixelColor(ix, iy).alpha()
-        except Exception:
-            return 0
-
-    def _get_alpha_fast(self, x: float, y: float) -> int:
+    def _get_alpha_fast(self, x: float, y: float):
         if not self._initialized_gl or not self._model:
             return 0
         if x < 0 or y < 0 or x >= self._cache_w or y >= self._cache_h:
             return 0
-            
+
         try:
             self._safe_make_current()
+            self._init_hit_pbos()
+            self._process_hit_pbo_results()
             sx = int(x * self._system_scale)
             sy = int((self._cache_h - 1 - y) * self._system_scale)
-            
-            gl.glReadPixels(sx, sy, 1, 1, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, self._pixel_buf)
-            return self._pixel_buf[3]
+            key = (sx, sy)
+            now = self._hit_clock.elapsed()
+            cached = self._hit_alpha_cache.get(key)
+            if cached and now - cached[1] <= self._hit_alpha_cache_ttl_ms:
+                return cached[0]
+            self._queue_hit_pbo_read(key, sx, sy)
+            if cached:
+                return cached[0]
+            return None
         except Exception:
             return 0
