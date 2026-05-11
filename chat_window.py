@@ -1112,6 +1112,68 @@ class ChatWindow(QWidget):
         if not conversations:
             empty = menu.addAction(_tr("ChatWindow.no_convs"))
             empty.setEnabled(False)
+        elif len(conversations) > 10:
+            container = QWidget(menu)
+            container.setObjectName("ConversationHistoryList")
+            layout = QVBoxLayout(container)
+            layout.setContentsMargins(4, 4, 8, 4)
+            layout.setSpacing(4)
+            for conv in conversations:
+                row = ConversationHistoryRow(
+                    conv["id"],
+                    self._conversation_title(conv),
+                    conv["id"] == self._conv_id,
+                    container,
+                )
+                row.selected.connect(lambda conv_id: self._select_history_row(menu, conv_id))
+                row.delete_requested.connect(lambda conv_id: self._delete_history_row(menu, conv_id))
+                layout.addWidget(row)
+
+            scroll = QScrollArea(menu)
+            scroll.setObjectName("ConversationHistoryScroll")
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            scroll.setFixedSize(312, 10 * 40 + 8)
+            scroll.setWidget(container)
+            scroll.viewport().setAutoFillBackground(False)
+            scroll.setStyleSheet(f"""
+                QScrollArea#ConversationHistoryScroll {{
+                    background: {bg};
+                    border: none;
+                }}
+                QScrollArea#ConversationHistoryScroll > QWidget > QWidget {{
+                    background: {bg};
+                }}
+                QWidget#ConversationHistoryList {{
+                    background: {bg};
+                }}
+                QScrollArea#ConversationHistoryScroll QScrollBar:vertical {{
+                    background: {bg};
+                    width: 8px;
+                    margin: 4px 0px 4px 0px;
+                }}
+                QScrollArea#ConversationHistoryScroll QScrollBar::handle:vertical {{
+                    background: {'#566074' if dark else '#c4cfe3'};
+                    border-radius: 4px;
+                    min-height: 30px;
+                }}
+                QScrollArea#ConversationHistoryScroll QScrollBar::handle:vertical:hover {{
+                    background: {'#69758d' if dark else '#aebbd4'};
+                }}
+                QScrollArea#ConversationHistoryScroll QScrollBar::add-line:vertical,
+                QScrollArea#ConversationHistoryScroll QScrollBar::sub-line:vertical {{
+                    height: 0px;
+                }}
+                QScrollArea#ConversationHistoryScroll QScrollBar::add-page:vertical,
+                QScrollArea#ConversationHistoryScroll QScrollBar::sub-page:vertical {{
+                    background: transparent;
+                }}
+            """)
+            scroll_action = QWidgetAction(menu)
+            scroll_action.setDefaultWidget(scroll)
+            menu.addAction(scroll_action)
         else:
             for conv in conversations:
                 row = ConversationHistoryRow(
