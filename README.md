@@ -57,8 +57,8 @@ cd BANDORI-PET-REV
 > | 下载渠道 | 链接 |
 > |----------|------|
 > | 🚀 **ModelScope** | [models.zip](https://modelscope.cn/datasets/HELPMEEADICE/BanG-Dream-Live2D/resolve/master/models.zip) |
-> | 🐌 **百度网盘** | [下载](https://pan.baidu.com/s/1fn7DfgFQLbM6ScS-qCJLYQ?pwd=3724) 提取码：`3724` |
 > | ☁️ **Google Drive** | [下载](https://drive.google.com/file/d/1t0TNRSV5gv2fTnFh-oWi70XNU1Xvfpub) |
+> | 🐌 **百度网盘** | [下载](https://pan.baidu.com/s/1fn7DfgFQLbM6ScS-qCJLYQ?pwd=3724) 提取码：`3724` |
 
 > 🚨 **传统 7z 模型包**（~4GB，需解压到磁盘）
 >
@@ -116,15 +116,15 @@ python main.py
 | 乐队 | 角色 | 服装 | LLM |
 |------|------|:---:|:---:|
 | **Poppin'Party** | 户山香澄 · 花园多惠 · 牛込里美 · 山吹沙绫 · 市谷有咲 | ✅ | ✅ |
-| **Afterglow** | 美竹兰 · 青叶摩卡 · 上原绯玛丽 · 宇田川巴 · 羽泽鸫 | ✅ | 部分 |
+| **Afterglow** | 美竹兰 · 青叶摩卡 · 上原绯玛丽 · 宇田川巴 · 羽泽鸫 | ✅ | ✅ |
 | **Pastel\*Palettes** | 丸山彩 · 冰川日菜 · 白鹭千圣 · 大和麻弥 · 若宫伊芙 | ✅ | 🚧 |
-| **Hello, Happy World!** | 弦卷心 · 濑田薰 · 北泽育美 · 松原花音 · 奥泽美咲 | ✅ | 🚧 |
-| **Roselia** | 凑友希那 · 冰川纱夜 · 今井莉莎 · 宇田川亚子 · 白金燐子 | ✅ | 部分 |
+| **Hello, Happy World!** | 弦卷心 · 濑田薰 · 北泽育美 · 松原花音 · 奥泽美咲 | ✅ | ✅ |
+| **Roselia** | 凑友希那 · 冰川纱夜 · 今井莉莎 · 宇田川亚子 · 白金燐子 | ✅ | ✅ |
 | **RAISE A SUILEN** | LAYER · MASKING · LOCK · PAREO · CHU² | ✅ | 🚧 |
-| **Morfonica** | 仓田真白 · 桐谷透子 · 广町七深 · 二叶筑紫 · 八潮瑠唯 | ✅ | 🚧 |
-| **MyGO!!!!!** | 千早爱音 · 高松灯 · 要乐奈 · 椎名立希 · 长崎素世 | ✅ | 🚧 |
+| **Morfonica** | 仓田真白 · 桐谷透子 · 广町七深 · 二叶筑紫 · 八潮瑠唯 | ✅ | ✅ |
+| **MyGO!!!!!** | 千早爱音 · 高松灯 · 要乐奈 · 椎名立希 · 长崎素世 | ✅ | ✅ |
 | **Ave Mujica** | 丰川祥子 · 若叶睦 · 三角初华 · 八幡海玲 · 祐天寺若麦 | ✅ | 🚧 |
-| **其他角色** | 纯田真奈 · 汐見蛍 等 | ✅ | 🚧 |
+| **其他角色** | 纯田真奈 · 户山明日香 等 | ✅ | 🚧 |
 
 > Poppin'Party 全员 + 美竹兰 + 凑友希那共 **7 位**角色已配置本地角色扮演 Prompt（`characters/` 目录）。更多角色的 Prompt 模板见 `PROMPT.md`，欢迎提交 PR 补全！
 
