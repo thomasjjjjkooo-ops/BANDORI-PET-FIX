@@ -25,6 +25,52 @@ def _normalize_lua_path(path) -> str:
     return str(path).replace("\\", "/")
 
 
+def _read_lua_chunk_bytes(path: Path) -> bytes:
+    return path.read_bytes()
+
+
+def _lua_module_name(path: Path, root: Path) -> str | None:
+    relative = path.relative_to(root)
+    if relative.suffix not in {".lua", ".ljbc"}:
+        return None
+    module_path = relative.with_suffix("")
+    parts = list(module_path.parts)
+    if not parts:
+        return None
+    if parts[-1] == "init":
+        parts = parts[:-1]
+    return ".".join(parts) if parts else None
+
+
+def _iter_lua_module_files(root: Path) -> list[tuple[str, Path]]:
+    modules: dict[str, Path] = {}
+    for pattern in ("**/*.lua", "**/*.ljbc"):
+        for path in sorted(root.glob(pattern)):
+            module_name = _lua_module_name(path, root)
+            if not module_name:
+                continue
+            current = modules.get(module_name)
+            if current is None or (current.suffix != ".ljbc" and path.suffix == ".ljbc"):
+                modules[module_name] = path
+    return sorted(modules.items())
+
+
+def _preload_lua_modules(lua: LuaRuntime, root: Path):
+    register = lua.eval(
+        b"function(name, chunk, chunk_name) "
+        b"local loader, err = load(chunk, chunk_name); "
+        b"assert(loader, err); "
+        b"package.preload[name] = loader "
+        b"end"
+    )
+    for module_name, module_path in _iter_lua_module_files(root):
+        register(
+            module_name.encode("utf-8"),
+            _read_lua_chunk_bytes(module_path),
+            ("@" + module_path.as_posix()).encode("utf-8"),
+        )
+
+
 def _load_model_bytes(path: str) -> bytes:
     path = _normalize_lua_path(path)
     if is_virtual_path(path):
@@ -266,6 +312,7 @@ class LuaLive2DModule:
             return
         lua = LuaRuntime(unpack_returned_tuples=True, encoding=None)
         lua.execute(b'assert(require("ffi"), "lupa must be built with LuaJIT FFI")')
+        _preload_lua_modules(lua, LIVE2D_LUA_DIR)
         lua_dir = LIVE2D_LUA_DIR.as_posix().encode("utf-8")
         lua.execute(
             b"local root = ...; "
