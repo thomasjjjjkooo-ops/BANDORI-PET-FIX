@@ -13,6 +13,7 @@ DEFAULTS = {
     "character": "",
     "costume": "",
     "models": [],
+    "model_action_settings": {},
     "language": "",
     "fps": 120,
     "opacity": 1.0,
@@ -56,6 +57,35 @@ MODEL_DEFAULTS = {
     "click_motion_actions": {},
 }
 
+MODEL_ACTION_KEYS = (
+    "default_motion",
+    "default_expression",
+    "click_motion_actions",
+)
+
+
+def model_action_settings_key(character: str, costume: str) -> str:
+    return f"{character}\t{costume}"
+
+
+def normalize_model_action_profile(profile) -> dict:
+    if not isinstance(profile, dict):
+        return {}
+
+    normalized = {}
+    default_motion = str(profile.get("default_motion", "") or "").strip()
+    default_expression = str(profile.get("default_expression", "") or "").strip()
+    click_motion_actions = normalize_click_motion_actions(
+        profile.get("click_motion_actions", {})
+    )
+    if default_motion:
+        normalized["default_motion"] = default_motion
+    if default_expression:
+        normalized["default_expression"] = default_expression
+    if click_motion_actions:
+        normalized["click_motion_actions"] = click_motion_actions
+    return normalized
+
 
 class ConfigManager:
     def __init__(self, path=CONFIG_PATH):
@@ -64,20 +94,53 @@ class ConfigManager:
         self.load()
 
     def load(self):
+        loaded = None
+        has_action_settings = False
         if self._path.exists():
             try:
                 with open(self._path, "r", encoding="utf-8") as f:
                     loaded = json.load(f)
+                has_action_settings = isinstance(loaded, dict) and "model_action_settings" in loaded
                 for k in DEFAULTS:
                     if k in loaded:
                         self._data[k] = loaded[k]
             except (json.JSONDecodeError, OSError):
                 pass
+        if loaded is None or not has_action_settings:
+            self._data["model_action_settings"] = {}
+        self._normalize_model_action_settings()
         self._normalize_models()
+        if not has_action_settings:
+            self._seed_model_action_settings_from_models()
         if not isinstance(self._data.get("chat_avatar_paths"), dict):
             self._data["chat_avatar_paths"] = {}
         if self._data.get("user_avatar_color") == "#2aabee":
             self._data["user_avatar_color"] = BANDORI_PRIMARY
+
+    def _normalize_model_action_settings(self):
+        profiles = self._data.get("model_action_settings", {})
+        if not isinstance(profiles, dict):
+            self._data["model_action_settings"] = {}
+            return
+
+        normalized = {}
+        for key, profile in profiles.items():
+            profile = normalize_model_action_profile(profile)
+            if profile:
+                normalized[str(key)] = profile
+        self._data["model_action_settings"] = normalized
+
+    def _seed_model_action_settings_from_models(self):
+        profiles = dict(self._data.get("model_action_settings", {}))
+        for item in self._data.get("models", []):
+            if not isinstance(item, dict):
+                continue
+            character = item.get("character", "")
+            costume = item.get("costume", "")
+            profile = normalize_model_action_profile(item)
+            if character and costume and profile:
+                profiles[model_action_settings_key(character, costume)] = profile
+        self._data["model_action_settings"] = profiles
 
     def _normalize_models(self):
         models = self._data.get("models", [])
@@ -95,6 +158,10 @@ class ConfigManager:
                 continue
             entry = dict(MODEL_DEFAULTS)
             entry.update(item)
+            profile = self.get_model_action_profile(character, costume)
+            for key in MODEL_ACTION_KEYS:
+                if not item.get(key) and profile.get(key):
+                    entry[key] = profile[key]
             entry["click_motion_actions"] = normalize_click_motion_actions(
                 entry.get("click_motion_actions", {})
             )
@@ -137,6 +204,31 @@ class ConfigManager:
 
     def update(self, d: dict):
         self._data.update(d)
+
+    def get_model_action_profile(self, character: str, costume: str) -> dict:
+        profiles = self._data.get("model_action_settings", {})
+        if not isinstance(profiles, dict):
+            return {}
+        key = model_action_settings_key(str(character or ""), str(costume or ""))
+        return dict(profiles.get(key, {}))
+
+    def set_model_action_profile(self, character: str, costume: str, profile):
+        character = str(character or "")
+        costume = str(costume or "")
+        if not character or not costume:
+            return
+        profiles = self._data.get("model_action_settings", {})
+        if not isinstance(profiles, dict):
+            profiles = {}
+        else:
+            profiles = dict(profiles)
+        key = model_action_settings_key(character, costume)
+        normalized = normalize_model_action_profile(profile)
+        if normalized:
+            profiles[key] = normalized
+        else:
+            profiles.pop(key, None)
+        self._data["model_action_settings"] = profiles
 
     @property
     def data(self):

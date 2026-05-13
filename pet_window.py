@@ -450,11 +450,28 @@ class PetWindow(QWidget):
         if not self._cfg:
             return {}
         models = self._cfg.get("models", [])
+        fallback = None
         if isinstance(models, list):
             for item in models:
-                if isinstance(item, dict) and item.get("character") == self._current_char:
-                    return item
-        return {}
+                if not isinstance(item, dict) or item.get("character") != self._current_char:
+                    continue
+                if item.get("costume") == self._current_costume:
+                    return self._with_saved_action_profile(item)
+                if fallback is None:
+                    fallback = item
+        return self._with_saved_action_profile(fallback or {})
+
+    def _with_saved_action_profile(self, entry: dict) -> dict:
+        if not self._cfg or not hasattr(self._cfg, "get_model_action_profile"):
+            return entry
+        profile = self._cfg.get_model_action_profile(self._current_char, self._current_costume)
+        if not profile:
+            return entry
+        merged = dict(entry)
+        for key in ("default_motion", "default_expression", "click_motion_actions"):
+            if not merged.get(key) and profile.get(key):
+                merged[key] = profile[key]
+        return merged
 
     def _configured_pet_mode(self) -> str:
         if not self._cfg:
@@ -504,6 +521,10 @@ class PetWindow(QWidget):
             self._live2d_widget.set_render_quality(self._live2d_quality)
         if "live2d_scale" in data:
             self.set_live2d_scale(data["live2d_scale"])
+        if self._cfg and ("models" in data or "model_action_settings" in data):
+            self._cfg.load()
+        if "model_action_settings" in data and self._cfg:
+            self._cfg.set("model_action_settings", data["model_action_settings"])
         if "models" in data and self._cfg:
             self._cfg.set("models", data["models"])
             self._cfg.save()
@@ -1365,6 +1386,8 @@ class PetWindow(QWidget):
         click_motion_actions = self._current_model_entry().get("click_motion_actions", {})
         if click_motion_actions:
             entry["click_motion_actions"] = click_motion_actions
+        if hasattr(self._cfg, "set_model_action_profile"):
+            self._cfg.set_model_action_profile(self._current_char, self._current_costume, entry)
         entry["pet_mode"] = "pixel" if self._pixel_mode else "live2d"
         if self._pixel_mode:
             entry.update({
@@ -1378,14 +1401,29 @@ class PetWindow(QWidget):
                 "window_width": self.width(),
                 "window_height": self.height(),
             })
+        updated = False
         for idx, item in enumerate(models):
-            if isinstance(item, dict) and item.get("character") == self._current_char:
+            if (
+                isinstance(item, dict)
+                and item.get("character") == self._current_char
+                and item.get("costume") == self._current_costume
+            ):
                 preserved = dict(item)
                 preserved.update(entry)
                 entry = preserved
                 models[idx] = entry
+                updated = True
                 break
-        else:
+        if not updated:
+            for idx, item in enumerate(models):
+                if isinstance(item, dict) and item.get("character") == self._current_char:
+                    preserved = dict(item)
+                    preserved.update(entry)
+                    entry = preserved
+                    models[idx] = entry
+                    updated = True
+                    break
+        if not updated:
             models.append(entry)
         self._cfg.set("models", models)
         if save:

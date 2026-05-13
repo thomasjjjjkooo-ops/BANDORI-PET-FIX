@@ -776,6 +776,7 @@ class SettingsWindow(QWidget):
                     continue
                 entry = dict(item)
                 entry.update({"character": character, "costume": costume, "path": path})
+                self._restore_model_action_profile(entry, prefer_existing=True)
                 entry["click_motion_actions"] = normalize_click_motion_actions(
                     entry.get("click_motion_actions", {})
                 )
@@ -792,6 +793,30 @@ class SettingsWindow(QWidget):
                     "click_motion_actions": {},
                 })
         return result
+
+    def _restore_model_action_profile(self, entry: dict, prefer_existing: bool = False):
+        if not self._cfg or not hasattr(self._cfg, "get_model_action_profile"):
+            return
+        profile = self._cfg.get_model_action_profile(
+            entry.get("character", ""),
+            entry.get("costume", ""),
+        )
+        if not profile:
+            return
+        for key in ("default_motion", "default_expression", "click_motion_actions"):
+            if prefer_existing and entry.get(key):
+                continue
+            if profile.get(key):
+                entry[key] = profile[key]
+
+    def _archive_model_action_profile(self, entry: dict):
+        if not self._cfg or not hasattr(self._cfg, "set_model_action_profile"):
+            return
+        self._cfg.set_model_action_profile(
+            entry.get("character", ""),
+            entry.get("costume", ""),
+            entry,
+        )
 
     def _on_language_changed(self, index: int):
         lang = self._lang_combo.itemData(index)
@@ -2564,6 +2589,8 @@ class SettingsWindow(QWidget):
     def _save_configured_models(self):
         if not self._cfg:
             return
+        for item in self._configured_models:
+            self._archive_model_action_profile(item)
         selected = self._selected_model_item()
         if selected:
             self._cfg.set("character", selected["character"])
@@ -2667,6 +2694,7 @@ class SettingsWindow(QWidget):
             "default_expression": "",
             "click_motion_actions": {},
         }
+        self._restore_model_action_profile(entry)
         replace_index = self._editing_model_index
         if replace_index is None and not self._adding_model:
             replace_character = self._editing_list_character or self._selected_list_character
@@ -2675,19 +2703,25 @@ class SettingsWindow(QWidget):
                     replace_index = idx
                     break
         if replace_index is not None and 0 <= replace_index < len(self._configured_models):
+            previous = self._configured_models[replace_index]
+            self._archive_model_action_profile(previous)
             preserved = dict(self._configured_models[replace_index])
             preserved.update(entry)
-            for key in (
+            preserve_keys = (
                 "window_x",
                 "window_y",
                 "window_width",
                 "window_height",
                 "pixel_window_x",
                 "pixel_window_y",
-                "default_motion",
-                "default_expression",
-                "click_motion_actions",
-            ):
+            )
+            if previous.get("character") == character and previous.get("costume") == costume:
+                preserve_keys += (
+                    "default_motion",
+                    "default_expression",
+                    "click_motion_actions",
+                )
+            for key in preserve_keys:
                 if key in self._configured_models[replace_index]:
                     preserved[key] = self._configured_models[replace_index][key]
             entry = preserved
@@ -2695,19 +2729,24 @@ class SettingsWindow(QWidget):
         else:
             for idx, item in enumerate(self._configured_models):
                 if item["character"] == character:
+                    self._archive_model_action_profile(item)
                     preserved = dict(item)
                     preserved.update(entry)
-                    for key in (
+                    preserve_keys = (
                         "window_x",
                         "window_y",
                         "window_width",
                         "window_height",
                         "pixel_window_x",
                         "pixel_window_y",
-                        "default_motion",
-                        "default_expression",
-                        "click_motion_actions",
-                    ):
+                    )
+                    if item.get("costume") == costume:
+                        preserve_keys += (
+                            "default_motion",
+                            "default_expression",
+                            "click_motion_actions",
+                        )
+                    for key in preserve_keys:
                         if key in item:
                             preserved[key] = item[key]
                     entry = preserved
@@ -2849,6 +2888,7 @@ class SettingsWindow(QWidget):
             "live2d_quality": self._live2d_quality,
             "live2d_scale": self._live2d_scale,
             "models": [dict(item) for item in self._configured_models],
+            "model_action_settings": self._cfg.get("model_action_settings", {}) if self._cfg else {},
         }
         if self._cfg:
             self._cfg.set("fps", settings["fps"])
