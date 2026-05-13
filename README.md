@@ -120,7 +120,7 @@ python main.py
 | **Pastel\*Palettes** | 丸山彩 · 冰川日菜 · 白鹭千圣 · 大和麻弥 · 若宫伊芙 | ✅ | ✅ |
 | **Hello, Happy World!** | 弦卷心 · 濑田薰 · 北泽育美 · 松原花音 · 奥泽美咲 | ✅ | ✅ |
 | **Roselia** | 凑友希那 · 冰川纱夜 · 今井莉莎 · 宇田川亚子 · 白金燐子 | ✅ | ✅ |
-| **RAISE A SUILEN** | LAYER · MASKING · LOCK · PAREO · CHU² | ✅ | 🚧 |
+| **RAISE A SUILEN** | LAYER · MASKING · LOCK · PAREO · CHU² | ✅ | ✅ |
 | **Morfonica** | 仓田真白 · 桐谷透子 · 广町七深 · 二叶筑紫 · 八潮瑠唯 | ✅ | ✅ |
 | **MyGO!!!!!** | 千早爱音 · 高松灯 · 要乐奈 · 椎名立希 · 长崎素世 | ✅ | ✅ |
 | **Ave Mujica** | 丰川祥子 · 若叶睦 · 三角初华 · 八幡海玲 · 祐天寺若麦 | ✅ | 🚧 |
