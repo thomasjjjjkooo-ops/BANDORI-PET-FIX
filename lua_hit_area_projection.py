@@ -22,8 +22,12 @@ def _lua_source_path() -> Path:
     return Path(__file__).resolve().with_name(f"{_LUA_BASENAME}.lua")
 
 
-_LOAD_CHUNK = _LUA.eval("function(path) local chunk, err = loadfile(path); assert(chunk, err); return chunk() end")
-_NEW_CUSTOM_HIT_AREA_STATE = _LOAD_CHUNK(str(_lua_source_path()))
+def _load_lua_chunk(path: Path):
+    # Let Python open the file so frozen apps still work from non-ASCII paths on Windows.
+    return _LUA.execute(path.read_bytes())
+
+
+_NEW_CUSTOM_HIT_AREA_STATE = _load_lua_chunk(_lua_source_path())
 
 
 class LuaCustomHitAreaState:
