@@ -1,8 +1,10 @@
 import math
 import ctypes
-import ctypes.wintypes
 import os
 from dataclasses import dataclass
+
+if os.name == "nt":
+    import ctypes.wintypes
 from typing import Callable
 
 from PySide6.QtCore import (

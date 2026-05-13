@@ -188,7 +188,7 @@ class Live2DWidget(QOpenGLWidget):
             self._update_render_timer()
             self.model_loaded.emit()
         except Exception as e:
-            print(f"Failed to load model: {e}")
+            print(f"Failed to load model: {e}", file=sys.stderr)
             self._model = None
             self._model_path = ""
             self._custom_hit_areas.clear()
@@ -309,13 +309,6 @@ class Live2DWidget(QOpenGLWidget):
         self._init_hit_pbos()
         self._update_render_timer()
         self.update()
-
-    def resizeGL(self, w: int, h: int):
-        self._clear_hit_framebuffer_cache()
-        gl.glViewport(0, 0, int(w * self._system_scale), int(h * self._system_scale))
-        if self._model:
-            self._model.Resize(w, h)
-            self._update_custom_hit_area_projection()
 
     def paintGL(self):
         if self._static_render and self._static_render_done:
