@@ -235,6 +235,10 @@ def main():
         cfg.set("game_topmost", pet_window_ref["game_topmost"])
         cfg.set("live2d_quality", pet_window_ref["live2d_quality"])
         cfg.set("live2d_scale", pet_window_ref["live2d_scale"])
+        if "model_action_settings" in data:
+            cfg.set("model_action_settings", data["model_action_settings"])
+        if "models" in data:
+            cfg.set("models", data["models"])
         cfg.save()
 
     def launch_pet():
