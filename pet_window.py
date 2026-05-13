@@ -156,6 +156,7 @@ class PetWindow(QWidget):
         self._pixel_mode = self._configured_pet_mode() == "pixel"
         self._pixel_ready = False
         self._show_pos_set = False
+        self._radial_menu_prewarmed = False
         self._motion_guard_token = 0
         self._expression_guard_token = 0
         self._click_expression_hold_until = 0.0
@@ -714,41 +715,65 @@ class PetWindow(QWidget):
 
     def _on_right_click(self, gx: int, gy: int):
         self._set_mouse_passthrough(False)
-        if self._radial_menu is not None and self._radial_menu.isVisible():
-            self._radial_menu.dismiss()
+        radial_menu = self._ensure_radial_menu()
+        if radial_menu.isVisible():
+            radial_menu.dismiss()
             return
+        self._refresh_radial_menu()
+        radial_menu.show_at(QPoint(gx, gy))
 
-        self._radial_menu = RadialMenu()
-        self._radial_menu.set_animation_fps(self._fps)
-        self._radial_menu.set_locked(self._live2d_widget._drag_locked)
-        self._radial_menu.lock_toggled.connect(self._on_lock_toggled)
-        self._radial_menu.closed.connect(lambda: setattr(self, '_radial_menu', None))
+    def _ensure_radial_menu(self) -> RadialMenu:
+        if self._radial_menu is not None:
+            return self._radial_menu
 
-        self._radial_menu.add_item(
+        radial_menu = RadialMenu()
+        radial_menu.lock_toggled.connect(self._on_lock_toggled)
+        radial_menu.add_item(
             "", _tr("PetWindow.radial_chat"), QColor(138, 43, 226),
             glyph="\U0001F4AC",
             on_click=self._on_radial_chat,
         )
-        self._radial_menu.add_item(
+        radial_menu.add_item(
             "", _tr("PetWindow.radial_costume"), QColor(220, 50, 120),
             glyph="\U0001F457",
             on_click=self._on_radial_costume,
         )
-        self._radial_menu.add_item(
+        radial_menu.add_item(
             "", _tr("PetWindow.radial_motion"), QColor(30, 144, 255),
             glyph="\U0001F3AC",
             on_click=self._on_radial_motion,
         )
-        pixel_label = _tr("PetWindow.radial_live2d") if self._pixel_mode else _tr("PetWindow.radial_pixel")
-        pixel_enabled = True if self._pixel_mode else bool(pixel_path_for_character(self._current_char))
-        self._radial_menu.add_item(
-            "", pixel_label, QColor(34, 180, 140),
-            glyph="\U0001F47E" if not self._pixel_mode else "L2D",
+        radial_menu.add_item(
+            "", _tr("PetWindow.radial_pixel"), QColor(34, 180, 140),
+            glyph="\U0001F47E",
             on_click=self._on_radial_pixel,
+            enabled=False,
+        )
+        self._radial_menu = radial_menu
+        return radial_menu
+
+    def _refresh_radial_menu(self):
+        if self._radial_menu is None:
+            return
+        self._radial_menu.set_animation_fps(self._fps)
+        self._radial_menu.set_locked(self._live2d_widget._drag_locked)
+        pixel_label = _tr("PetWindow.radial_live2d") if self._pixel_mode else _tr("PetWindow.radial_pixel")
+        pixel_glyph = "L2D" if self._pixel_mode else "\U0001F47E"
+        pixel_enabled = True if self._pixel_mode else bool(pixel_path_for_character(self._current_char))
+        self._radial_menu.update_item(
+            3,
+            label=pixel_label,
+            glyph=pixel_glyph,
             enabled=pixel_enabled,
         )
 
-        self._radial_menu.show_at(QPoint(gx, gy))
+    def _prewarm_radial_menu(self):
+        if self._radial_menu_prewarmed or not self.isVisible():
+            return
+        radial_menu = self._ensure_radial_menu()
+        self._refresh_radial_menu()
+        radial_menu.prepare_for_show()
+        self._radial_menu_prewarmed = True
 
     def _on_radial_chat(self):
         self._open_chat()
@@ -1388,6 +1413,7 @@ class PetWindow(QWidget):
         super().showEvent(event)
         self._apply_windows_frameless_fix()
         self._update_game_topmost_timer()
+        QTimer.singleShot(0, self._prewarm_radial_menu)
         if self._show_pos_set:
             return
         screen = QApplication.primaryScreen()

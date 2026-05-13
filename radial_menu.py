@@ -55,6 +55,27 @@ class RadialMenuItem(QWidget):
         self.setCursor(Qt.CursorShape.PointingHandCursor if enabled else Qt.CursorShape.ForbiddenCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
+    def set_label(self, label: str):
+        if self._label == label:
+            return
+        self._label = label
+        self.update()
+
+    def set_glyph(self, glyph: str):
+        if self._glyph == glyph:
+            return
+        self._glyph = glyph
+        self.update()
+
+    def set_enabled_state(self, enabled: bool):
+        if self._enabled == enabled:
+            return
+        self._enabled = enabled
+        self.setCursor(
+            Qt.CursorShape.PointingHandCursor if enabled else Qt.CursorShape.ForbiddenCursor
+        )
+        self.update()
+
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -152,6 +173,7 @@ class RadialMenu(QWidget):
         self._center_scale = 1.0
         self._center_anim_value = 1.0
         self._lock_anim = None
+        self._border_fix_applied = False
 
         self.setMouseTracking(True)
 
@@ -178,7 +200,16 @@ class RadialMenu(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self._apply_windows_11_border_fix()
+        if not self._border_fix_applied:
+            self._apply_windows_11_border_fix()
+            self._border_fix_applied = True
+
+    def prepare_for_show(self):
+        # Force native window creation during idle time so first popup stays responsive.
+        self.winId()
+        if not self._border_fix_applied:
+            self._apply_windows_11_border_fix()
+            self._border_fix_applied = True
 
     @property
     def locked(self):
@@ -258,6 +289,18 @@ class RadialMenu(QWidget):
             end_offset=QPoint(0, 0),
             opacity_effect=opacity,
         ))
+
+    def update_item(self, index: int, *, label: str | None = None,
+                    glyph: str | None = None, enabled: bool | None = None):
+        if index < 0 or index >= len(self._items):
+            return
+        widget = self._items[index].widget
+        if label is not None:
+            widget.set_label(label)
+        if glyph is not None:
+            widget.set_glyph(glyph)
+        if enabled is not None:
+            widget.set_enabled_state(enabled)
 
     def show_at(self, center: QPoint):
         if self._is_showing:
@@ -391,6 +434,14 @@ class RadialMenu(QWidget):
         super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent):
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
+
+        if any(item.widget.geometry().contains(event.pos()) for item in self._items):
+            super().mousePressEvent(event)
+            return
+
         cx = self.width() // 2
         cy = self.height() // 2
         dx = event.pos().x() - cx
@@ -399,10 +450,8 @@ class RadialMenu(QWidget):
 
         if dist < 40:
             self._toggle_locked()
-        elif dist > self._radius + 50:
-            self.dismiss()
         else:
-            super().mousePressEvent(event)
+            self.dismiss()
 
     def paintEvent(self, event):
         p = QPainter(self)

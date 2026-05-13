@@ -41,6 +41,7 @@ class Live2DWidget(QOpenGLWidget):
         
         self._dragging = False
         self._drag_moved = False
+        self._pressed_on_model = False
         self._drag_start_x = 0
         self._drag_start_y = 0
         self._drag_origin_x = 0
@@ -374,15 +375,16 @@ class Live2DWidget(QOpenGLWidget):
         self._track_head_at_global(pos.x(), pos.y())
 
     def mousePressEvent(self, event: QMouseEvent):
-        if self._drag_locked:
-            super().mousePressEvent(event)
-            return
         if event.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(event)
             return
         x = event.scenePosition().x()
         y = event.scenePosition().y()
-        if self._is_model_hit_at(x, y):
+        self._pressed_on_model = self._is_model_hit_at(x, y)
+        if self._drag_locked:
+            super().mousePressEvent(event)
+            return
+        if self._pressed_on_model:
             self._dragging = True
             self._drag_moved = False
             gpos = event.globalPosition()
@@ -399,18 +401,22 @@ class Live2DWidget(QOpenGLWidget):
                 gpos = event.globalPosition()
                 self._right_click_callback(int(gpos.x()), int(gpos.y()))
             return
-        if self._dragging:
+        if event.button() == Qt.MouseButton.LeftButton:
             should_click = (
-                event.button() == Qt.MouseButton.LeftButton
+                self._pressed_on_model
                 and not self._drag_moved
                 and self._click_callback
                 and self._is_model_hit_at(event.scenePosition().x(), event.scenePosition().y())
             )
+            self._pressed_on_model = False
+        else:
+            should_click = False
+        if self._dragging:
             self._dragging = False
-            if should_click:
-                x = event.scenePosition().x()
-                y = event.scenePosition().y()
-                self._click_callback(x, y, self.hit_area_name_at(x, y))
+        if should_click:
+            x = event.scenePosition().x()
+            y = event.scenePosition().y()
+            self._click_callback(x, y, self.hit_area_name_at(x, y))
 
     def mouseMoveEvent(self, event: QMouseEvent):
         if self._drag_locked:

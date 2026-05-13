@@ -20,6 +20,8 @@ import PySide6.QtWidgets  # noqa: E402,F401
 class BuildExeWithEmptyModels(build_exe):
     def run(self):
         super().run()
+        if BYTECODE_BUILD_DIR.exists():
+            shutil.rmtree(BYTECODE_BUILD_DIR)
         models_dir = Path(self.build_exe) / "models"
         models_dir.mkdir(parents=True, exist_ok=True)
 
