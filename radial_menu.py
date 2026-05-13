@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from PySide6.QtCore import (
-    Qt, Signal, QPoint, QPropertyAnimation, QEasingCurve,
+    Qt, Signal, QPoint, QPropertyAnimation, QEasingCurve, QTimer,
     QParallelAnimationGroup, QVariantAnimation,
 )
 from PySide6.QtGui import (
@@ -22,8 +22,25 @@ DWMWA_WINDOW_CORNER_PREFERENCE = 33
 DWMWA_BORDER_COLOR = 34
 DWMWCP_DONOTROUND = 1
 DWMWA_COLOR_NONE = 0xFFFFFFFE
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
+SWP_NOZORDER = 0x0004
+SWP_NOACTIVATE = 0x0010
+SWP_FRAMECHANGED = 0x0020
 
 if os.name == "nt":
+    _user32 = ctypes.windll.user32
+    _set_window_pos = _user32.SetWindowPos
+    _set_window_pos.argtypes = [
+        ctypes.wintypes.HWND,
+        ctypes.wintypes.HWND,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_uint,
+    ]
+    _set_window_pos.restype = ctypes.wintypes.BOOL
     _dwmapi = ctypes.windll.dwmapi
     _dwm_set_window_attribute = _dwmapi.DwmSetWindowAttribute
     _dwm_set_window_attribute.argtypes = [
@@ -34,6 +51,7 @@ if os.name == "nt":
     ]
     _dwm_set_window_attribute.restype = ctypes.c_long
 else:
+    _set_window_pos = None
     _dwm_set_window_attribute = None
 
 
@@ -173,7 +191,6 @@ class RadialMenu(QWidget):
         self._center_scale = 1.0
         self._center_anim_value = 1.0
         self._lock_anim = None
-        self._border_fix_applied = False
 
         self.setMouseTracking(True)
 
@@ -197,19 +214,26 @@ class RadialMenu(QWidget):
                 )
             except Exception:
                 pass
+        if _set_window_pos is not None:
+            _set_window_pos(
+                hwnd,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            )
 
     def showEvent(self, event):
         super().showEvent(event)
-        if not self._border_fix_applied:
-            self._apply_windows_11_border_fix()
-            self._border_fix_applied = True
+        self._apply_windows_11_border_fix()
+        QTimer.singleShot(0, self._apply_windows_11_border_fix)
 
     def prepare_for_show(self):
         # Force native window creation during idle time so first popup stays responsive.
         self.winId()
-        if not self._border_fix_applied:
-            self._apply_windows_11_border_fix()
-            self._border_fix_applied = True
+        self._apply_windows_11_border_fix()
 
     @property
     def locked(self):
