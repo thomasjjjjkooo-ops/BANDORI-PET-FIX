@@ -974,11 +974,19 @@ class PetWindow(QWidget):
 
         if not self.isVisible():
             return
-        self._sync_compact_ai_window(allow_create=True, force_visible=True)
+        should_position = (
+            self._compact_ai_window is None
+            or not self._compact_ai_window.isVisible()
+            or bool(event.get("anchor_to_pet"))
+        )
+        self._sync_compact_ai_window(
+            allow_create=True,
+            force_visible=True,
+            reposition=should_position,
+        )
         if self._compact_ai_window is None:
             return
         self._compact_ai_window.apply_ai_event(event)
-        self._sync_compact_ai_window(allow_create=True, force_visible=True)
 
     def _read_chat_process_error(self, process: QProcess):
         data = bytes(process.readAllStandardError()).decode("utf-8", errors="replace").strip()
@@ -1043,7 +1051,12 @@ class PetWindow(QWidget):
         self._compact_ai_drag_bounds = None
         return max(240, int(round(self.width() * 0.9))), None
 
-    def _sync_compact_ai_window(self, allow_create: bool = False, force_visible: bool = False):
+    def _sync_compact_ai_window(
+        self,
+        allow_create: bool = False,
+        force_visible: bool = False,
+        reposition: bool = True,
+    ):
         if not (self._compact_ai_window_enabled or force_visible) or not self.isVisible():
             if self._compact_ai_window is not None:
                 self._compact_ai_window.hide()
@@ -1052,8 +1065,9 @@ class PetWindow(QWidget):
             if not allow_create:
                 return
             self._ensure_compact_ai_window()
-        target_width, bounds = self._compact_window_target()
-        self._compact_ai_window.position_near_pet(self.geometry(), target_width, bounds)
+        if reposition:
+            target_width, bounds = self._compact_window_target()
+            self._compact_ai_window.position_near_pet(self.geometry(), target_width, bounds)
         self._compact_ai_window.show()
         self._compact_ai_window.raise_()
 

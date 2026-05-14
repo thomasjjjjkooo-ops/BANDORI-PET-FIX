@@ -256,6 +256,9 @@ class CompactAIWindow(QWidget):
 
     def position_near_pet(self, pet_geo: QRect, target_width: int | None = None, bounds=None):
         self._pet_geo = QRect(pet_geo)
+        if self._geometry_anim is not None:
+            self._geometry_anim.stop()
+            self._geometry_anim = None
         if target_width:
             self.fit_to_width(target_width)
         screen = QApplication.screenAt(pet_geo.center()) or QApplication.primaryScreen()
@@ -324,8 +327,7 @@ class CompactAIWindow(QWidget):
         if self.height() == target_height:
             return
         old_geo = self.geometry()
-        bottom = old_geo.bottom()
-        target_geo = QRect(old_geo.x(), bottom - target_height + 1, old_geo.width(), target_height)
+        target_geo = QRect(old_geo.x(), old_geo.y(), old_geo.width(), target_height)
         if self._manual_offset is not None and not self._pet_geo.isNull():
             self._manual_offset = target_geo.topLeft() - self._pet_geo.topLeft()
         if not animated or not self.isVisible():
@@ -457,10 +459,18 @@ class CompactAIWindow(QWidget):
         if not mode:
             mode = "append" if state == "stream" else "replace"
 
-        line = self._format_ai_event_text(state, title, text, source, event.get("progress"))
-        if mode == "append":
+        raw_text_mode = mode.endswith("_raw")
+        normalized_mode = mode.removesuffix("_raw")
+
+        line = (
+            text
+            if raw_text_mode
+            else self._format_ai_event_text(state, title, text, source, event.get("progress"))
+        )
+        if normalized_mode == "append":
             if line:
-                self._external_stream_text = (self._external_stream_text + line)[-4000:]
+                chunk = text if self._external_stream_text and not raw_text_mode else line
+                self._external_stream_text = (self._external_stream_text + chunk)[-4000:]
             output = self._external_stream_text
         else:
             self._external_stream_text = line
@@ -516,7 +526,17 @@ class CompactAIWindow(QWidget):
 
     def send_message(self):
         text = self._input.toPlainText().strip()
-        if not text or self._worker is not None:
+        if not text:
+            return
+        if text.lower() == "@clear":
+            self._input.clear()
+            self._clear_timer.stop()
+            self._external_stream_text = ""
+            self._stream_text = ""
+            self._thinking_text = ""
+            self._set_output_text("")
+            return
+        if self._worker is not None:
             return
 
         api_url = self._cfg.get("llm_api_url", "") if self._cfg else ""
