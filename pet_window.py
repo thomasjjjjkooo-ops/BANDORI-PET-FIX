@@ -1,10 +1,13 @@
 import ctypes
-import ctypes.wintypes
 import json
 import os
 import random
 import re
+import sys
 import time
+
+if os.name == "nt":
+    import ctypes.wintypes
 
 from PySide6.QtCore import Qt, QPoint, QTimer, QPropertyAnimation, QEasingCurve, QProcess, QEvent
 from PySide6.QtGui import QColor, QIcon, QCursor, QMoveEvent, QResizeEvent
@@ -28,6 +31,11 @@ from model_manager import ModelManager
 from pixel_pet_widget import PixelPetWidget, load_pixel_frames, pixel_path_for_character
 from process_utils import app_base_dir, ipc_server_name, process_program_and_args
 from radial_menu import RadialMenu
+
+if sys.platform == "darwin":
+    import macos_patch
+else:
+    macos_patch = None
 
 
 WM_NCHITTEST = 0x0084
@@ -330,7 +338,7 @@ class PetWindow(QWidget):
             0,
             0,
             0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
         )
 
     def eventFilter(self, obj, event):
@@ -343,13 +351,14 @@ class PetWindow(QWidget):
         return super().eventFilter(obj, event)
 
     def _set_mouse_passthrough(self, enabled: bool):
-        if (
-            os.name != "nt"
-            or self._use_native_hit_test_passthrough
-            or enabled == self._mouse_passthrough
-        ):
+        if self._use_native_hit_test_passthrough or enabled == self._mouse_passthrough:
             return
-        self._apply_passthrough_to_hwnd(int(self.winId()), enabled)
+        if os.name == "nt":
+            self._apply_passthrough_to_hwnd(int(self.winId()), enabled)
+        elif sys.platform == "darwin" and macos_patch is not None:
+            macos_patch.set_ignores_mouse_events(self, enabled)
+        else:
+            return
         self._mouse_passthrough = enabled
 
     def _apply_passthrough_to_hwnd(self, hwnd: int, enabled: bool):
@@ -377,7 +386,9 @@ class PetWindow(QWidget):
         return self._live2d_widget.is_model_hit_at_global(global_pos)
 
     def _update_mouse_passthrough(self):
-        if os.name != "nt" or self._use_native_hit_test_passthrough or not self.isVisible():
+        if self._use_native_hit_test_passthrough or not self.isVisible():
+            return
+        if os.name != "nt" and sys.platform != "darwin":
             return
         if self._live2d_widget._dragging or self._pixel_widget._dragging:
             return
@@ -1660,8 +1671,13 @@ class PetWindow(QWidget):
         super().showEvent(event)
         self._apply_windows_frameless_fix()
         self._update_game_topmost_timer()
+        if sys.platform == "darwin" and macos_patch is not None:
+            QTimer.singleShot(0, lambda: (
+                macos_patch.set_window_no_shadow(self),
+                macos_patch.set_window_level_floating(self)
+            ))
         QTimer.singleShot(0, self._prewarm_radial_menu)
-        if self._show_pos_set:
+        if self._show_pos_set and self._is_position_on_screen():
             self._sync_compact_ai_window(allow_create=True)
             return
         screen = QApplication.primaryScreen()
@@ -1674,6 +1690,16 @@ class PetWindow(QWidget):
         self._show_pos_set = True
         self._play_entrance()
         self._sync_compact_ai_window(allow_create=True)
+
+    def _is_position_on_screen(self) -> bool:
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return False
+        geo = screen.availableGeometry()
+        return (self.x() + self.width() > geo.left() and
+                self.x() < geo.right() and
+                self.y() + self.height() > geo.top() and
+                self.y() < geo.bottom())
 
     def _play_entrance(self):
         self.setWindowOpacity(0.0)

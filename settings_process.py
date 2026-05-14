@@ -44,10 +44,16 @@ def main():
     set_language(cfg.get("language", "") or detect_system_language())
 
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseDesktopOpenGL)
+    if sys.platform != "darwin":
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseDesktopOpenGL)
 
     set_windows_app_user_model_id("BandoriPet.Settings")
+
     app = QApplication(sys.argv)
+
+    if sys.platform == "darwin":
+        import macos_patch
+        macos_patch.hide_dock_icon()
     app.setApplicationName("BandoriPetSettings")
     app.setOrganizationName("BandoriPet")
     app.setQuitOnLastWindowClosed(True)

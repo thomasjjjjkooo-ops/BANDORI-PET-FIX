@@ -26,13 +26,15 @@ from app_theme import (
 )
 
 import ctypes
-import ctypes.wintypes
 import os
 import shutil
 from datetime import datetime
 import json
 import re
 from pathlib import Path
+
+if os.name == "nt":
+    import ctypes.wintypes
 
 from llm_manager import (
     build_system_prompt, LLMStreamWorker, NonStreamWorker,

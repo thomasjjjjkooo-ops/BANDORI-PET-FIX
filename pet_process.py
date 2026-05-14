@@ -69,9 +69,16 @@ def main():
 
     live2d.init()
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseDesktopOpenGL)
+    if sys.platform != "darwin":
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseDesktopOpenGL)
     Live2DWidget.configure_default_surface_format()
+
     app = QApplication(sys.argv)
+
+    if sys.platform == "darwin":
+        import macos_patch
+        macos_patch.hide_dock_icon()
+
     app.setApplicationName(f"BandoriPet-{args.character}")
     app.setOrganizationName("BandoriPet")
     app.setQuitOnLastWindowClosed(False)

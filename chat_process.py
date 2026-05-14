@@ -34,6 +34,10 @@ def main():
     set_language(lang)
 
     app = QApplication(sys.argv)
+
+    if sys.platform == "darwin":
+        import macos_patch
+        macos_patch.hide_dock_icon()
     app.setApplicationName("BandoriPetChat")
     app.setOrganizationName("BandoriPet")
     app.setQuitOnLastWindowClosed(True)

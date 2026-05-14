@@ -1,4 +1,5 @@
 import ctypes
+import sys
 import OpenGL.GL as gl
 from PySide6.QtCore import Qt, QPoint, QElapsedTimer, QTimer, Signal
 from PySide6.QtGui import QMouseEvent, QCursor, QGuiApplication, QSurfaceFormat, QOpenGLContext, QMoveEvent, QResizeEvent
@@ -188,7 +189,7 @@ class Live2DWidget(QOpenGLWidget):
             self._update_render_timer()
             self.model_loaded.emit()
         except Exception as e:
-            print(f"Failed to load model: {e}")
+            print(f"Failed to load model: {e}", file=sys.stderr)
             self._model = None
             self._model_path = ""
             self._custom_hit_areas.clear()
@@ -311,6 +312,10 @@ class Live2DWidget(QOpenGLWidget):
         self.update()
 
     def resizeGL(self, w: int, h: int):
+        self._cache_w = w
+        self._cache_h = h
+        self._cache_w_half = w * 0.5
+        self._cache_h_half = h * 0.5
         self._clear_hit_framebuffer_cache()
         gl.glViewport(0, 0, int(w * self._system_scale), int(h * self._system_scale))
         if self._model:

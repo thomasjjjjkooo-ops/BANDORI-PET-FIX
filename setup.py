@@ -140,7 +140,7 @@ build_exe_options = {
         "sqlite3",
     ],
     "excludes": ["PyQt5", "PyQt6", "PySide2", "tkinter"],
-    "include_msvcr": True,
+    "include_msvcr": sys.platform == "win32",
     
     "zip_include_packages": ["*"], 
     "zip_exclude_packages": [],
@@ -149,13 +149,15 @@ build_exe_options = {
 base = "Win32GUI" if sys.platform == "win32" else None
 icon = str(BASE_DIR / "logo.ico") if (BASE_DIR / "logo.ico").exists() else None
 
+_exec_suffix = ".exe" if sys.platform == "win32" else ""
+
 executables = [
-    Executable("main.py", base=base, target_name="BandoriPet.exe", icon=icon),
-    Executable("pet_process.py", base=base, target_name="pet_process.exe"),
-    Executable("settings_process.py", base=base, target_name="settings_process.exe"),
-    Executable("chat_process.py", base=base, target_name="chat_process.exe"),
-    Executable("bandori_ai_event.py", base=None, target_name="bandori-ai-event.exe"),
-    Executable("bandori_codex_runner.py", base=None, target_name="bandori-codex-runner.exe"),
+    Executable("main.py", base=base, target_name=f"BandoriPet{_exec_suffix}", icon=icon),
+    Executable("pet_process.py", base=base, target_name=f"pet_process{_exec_suffix}"),
+    Executable("settings_process.py", base=base, target_name=f"settings_process{_exec_suffix}"),
+    Executable("chat_process.py", base=base, target_name=f"chat_process{_exec_suffix}"),
+    Executable("bandori_ai_event.py", base=None, target_name=f"bandori-ai-event{_exec_suffix}"),
+    Executable("bandori_codex_runner.py", base=None, target_name=f"bandori-codex-runner{_exec_suffix}"),
 ]
 
 setup(

@@ -44,10 +44,15 @@ def main():
     live2d.init()
 
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseDesktopOpenGL)
+    if sys.platform != "darwin":
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseDesktopOpenGL)
     Live2DWidget.configure_default_surface_format()
 
     app = QApplication(sys.argv)
+
+    if sys.platform == "darwin":
+        import macos_patch
+        macos_patch.hide_dock_icon()
     app.setApplicationName("BandoriPet")
     app.setOrganizationName("BandoriPet")
     app.setQuitOnLastWindowClosed(False)
@@ -71,6 +76,8 @@ def main():
         nonlocal tray_icon
         tray_icon = QSystemTrayIcon(app)
         icon_path = os.path.join(BASE_DIR, "logo.ico")
+        if not os.path.exists(icon_path):
+            icon_path = os.path.join(BASE_DIR, "logo.png")
         tray_icon.setIcon(QIcon(icon_path) if os.path.exists(icon_path) else QIcon())
         tray_icon.setToolTip(_tr("MainTray.tooltip"))
 

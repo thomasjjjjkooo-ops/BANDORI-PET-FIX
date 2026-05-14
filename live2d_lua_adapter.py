@@ -324,6 +324,7 @@ class LuaLive2DModule:
         self._draw = lua.eval(b"function(renderer, opts) return renderer:draw(opts) end")
         self._drag = lua.eval(b"function(renderer, x, y) return renderer:drag(x, y) end")
         self._hit_test = lua.eval(b"function(renderer, x, y) return renderer:hit_test(x, y) end")
+        self._set_offset = lua.eval(b"function(renderer, x, y) return renderer:set_offset(x, y) end")
         self._apply_texture_quality = lua.eval(
             b"(function() "
             b"local gl = require('live2d.core.live2d_gl_wrapper'); "
@@ -452,6 +453,10 @@ class LuaLAppModel:
     def Drag(self, x: float, y: float):
         if self._renderer is not None:
             self._module._drag(self._renderer, float(x), float(y))
+
+    def SetOffset(self, x: float, y: float):
+        if self._renderer is not None:
+            self._module._set_offset(self._renderer, float(x), float(y))
 
     def HitTest(self, _area_name: str, x: float, y: float):
         if self._renderer is None:
