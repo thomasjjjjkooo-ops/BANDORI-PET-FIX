@@ -3,10 +3,10 @@ from datetime import datetime
 
 import fluent_bootstrap  # noqa: F401
 from PySide6.QtCore import Qt, Signal, QThread, QTimer, QPropertyAnimation, QEasingCurve, QVariantAnimation, QPoint, QEvent, QUrl
-from PySide6.QtGui import QFont, QColor, QPalette, QPixmap, QIcon, QCursor, QPainter, QPainterPath, QPen, QBrush, QIntValidator, QDesktopServices
+from PySide6.QtGui import QColor, QPalette, QPixmap, QIcon, QCursor, QPainter, QPainterPath, QPen, QBrush, QIntValidator, QDesktopServices
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGridLayout,
-    QPushButton, QSizePolicy, QSpacerItem, QScrollArea,
+    QPushButton, QSizePolicy, QScrollArea,
     QLineEdit, QGraphicsOpacityEffect, QGraphicsColorizeEffect, QApplication,
     QTextEdit, QToolButton, QFileDialog, QMessageBox,
 )
@@ -648,7 +648,6 @@ class NavButton(QPushButton):
         bg = "#2a2a2a" if dark else "#fafafa"
         hover_bg = "#3a3a3a" if dark else "#f3e3e9"
         checked_bg = BANDORI_PRIMARY_SOFT_DARK if dark else BANDORI_PRIMARY_SOFT
-        checked_border = accent_color(dark)
         text_color = "#e0e0e0" if dark else "#2a2a2a"
         checked_text = BANDORI_PRIMARY_DARK if dark else BANDORI_PRIMARY
         border = "1px solid transparent" if dark else "1px solid #e0e0e0"

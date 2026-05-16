@@ -13,7 +13,7 @@ from PySide6.QtCore import (
     QParallelAnimationGroup, QVariantAnimation,
 )
 from PySide6.QtGui import (
-    QPainter, QColor, QFont, QPen, QBrush, QMouseEvent,
+    QPainter, QColor, QPen, QBrush, QMouseEvent,
     QRadialGradient, QFontMetrics, QPixmap,
 )
 from PySide6.QtWidgets import (
@@ -57,6 +57,11 @@ if os.name == "nt":
 else:
     _set_window_pos = None
     _dwm_set_window_attribute = None
+
+if sys.platform == "darwin":
+    import macos_patch
+else:
+    macos_patch = None
 
 
 class RadialMenuItem(QWidget):
@@ -249,11 +254,22 @@ class RadialMenu(QWidget):
         super().showEvent(event)
         self._apply_windows_11_border_fix()
         QTimer.singleShot(0, self._apply_windows_11_border_fix)
+        if macos_patch is not None:
+            QTimer.singleShot(0, self._apply_macos_window_polish)
+
+    def _apply_macos_window_polish(self):
+        if macos_patch is None:
+            return
+        macos_patch.set_window_no_shadow(self)
+        # Use status-bar level so the menu stays above the floating pet window.
+        macos_patch.set_window_level_above_menu_bar(self)
 
     def prepare_for_show(self):
         # Force native window creation during idle time so first popup stays responsive.
         self.winId()
         self._apply_windows_11_border_fix()
+        if macos_patch is not None:
+            self._apply_macos_window_polish()
         self._prewarm_paint_cache()
 
     def _prewarm_paint_cache(self):

@@ -1,6 +1,5 @@
 import json
 import locale
-from pathlib import Path
 from process_utils import app_base_dir
 
 
