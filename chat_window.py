@@ -1222,10 +1222,10 @@ class ChatWindow(QWidget):
             "focus_border": accent_color(dark),
         }
 
-        self.setStyleSheet(f"""
-            ChatWindow {{
+        self.setStyleSheet("""
+            ChatWindow {
                 background: transparent;
-            }}
+            }
         """)
 
         self._shell.set_panel_style(bg, border, 14, 1)
