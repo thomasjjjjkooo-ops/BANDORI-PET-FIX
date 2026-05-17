@@ -13,7 +13,7 @@ from PySide6.QtCore import (
     QParallelAnimationGroup, QVariantAnimation,
 )
 from PySide6.QtGui import (
-    QPainter, QColor, QFont, QPen, QBrush, QMouseEvent,
+    QPainter, QColor, QPen, QBrush, QMouseEvent,
     QRadialGradient, QFontMetrics, QPixmap,
 )
 from PySide6.QtWidgets import (

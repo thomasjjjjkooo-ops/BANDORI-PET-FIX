@@ -3,10 +3,10 @@ from datetime import datetime
 
 import fluent_bootstrap  # noqa: F401
 from PySide6.QtCore import Qt, Signal, QThread, QTimer, QPropertyAnimation, QEasingCurve, QVariantAnimation, QPoint, QEvent, QUrl
-from PySide6.QtGui import QFont, QColor, QPalette, QPixmap, QIcon, QCursor, QPainter, QPainterPath, QPen, QBrush, QIntValidator, QDesktopServices
+from PySide6.QtGui import QColor, QPalette, QPixmap, QIcon, QCursor, QPainter, QPainterPath, QPen, QBrush, QIntValidator, QDesktopServices
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGridLayout,
-    QPushButton, QSizePolicy, QSpacerItem, QScrollArea,
+    QPushButton, QSizePolicy, QScrollArea,
     QLineEdit, QGraphicsOpacityEffect, QGraphicsColorizeEffect, QApplication,
     QTextEdit, QToolButton, QFileDialog, QMessageBox,
 )
@@ -116,6 +116,10 @@ class ModelListItem(QWidget):
         text_col.setSpacing(1)
         self._title = BodyLabel(title, self)
         self._subtitle = QLabel(subtitle, self)
+        for label in (self._title, self._subtitle):
+            label.setMinimumWidth(0)
+            label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            label.setToolTip(label.text())
         text_col.addWidget(self._title)
         text_col.addWidget(self._subtitle)
         layout.addLayout(text_col, 1)
@@ -125,7 +129,7 @@ class ModelListItem(QWidget):
         self._remove_btn.setFixedSize(22, 22)
         self._remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._remove_btn.clicked.connect(lambda: self.remove_requested.emit(self._character))
-        layout.addWidget(self._remove_btn)
+        layout.addWidget(self._remove_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.setFixedHeight(50)
         self._apply_theme()
         qconfig.themeChanged.connect(self._apply_theme)
@@ -648,7 +652,6 @@ class NavButton(QPushButton):
         bg = "#2a2a2a" if dark else "#fafafa"
         hover_bg = "#3a3a3a" if dark else "#f3e3e9"
         checked_bg = BANDORI_PRIMARY_SOFT_DARK if dark else BANDORI_PRIMARY_SOFT
-        checked_border = accent_color(dark)
         text_color = "#e0e0e0" if dark else "#2a2a2a"
         checked_text = BANDORI_PRIMARY_DARK if dark else BANDORI_PRIMARY
         border = "1px solid transparent" if dark else "1px solid #e0e0e0"
@@ -2668,6 +2671,7 @@ class SettingsWindow(QWidget):
                     "SettingsWindow.chat_data_export_content",
                     conversations=summary["conversations"],
                     messages=summary["messages"],
+                    group_messages=summary.get("group_messages", 0),
                 ),
                 duration=3000,
                 position=InfoBarPosition.TOP,
@@ -2706,6 +2710,7 @@ class SettingsWindow(QWidget):
                     "SettingsWindow.chat_data_import_content",
                     conversations=summary["conversations"],
                     messages=summary["messages"],
+                    group_messages=summary.get("group_messages", 0),
                 ),
                 duration=4000,
                 position=InfoBarPosition.TOP,

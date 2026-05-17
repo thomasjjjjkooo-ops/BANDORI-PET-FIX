@@ -2,7 +2,6 @@ import json
 import re
 import urllib.request
 import urllib.error
-from pathlib import Path
 from PySide6.QtCore import QThread, Signal
 
 
@@ -506,7 +505,11 @@ class LLMStreamWorker(QThread):
                     while b"\n" in buffer:
                         line, buffer = buffer.split(b"\n", 1)
                         self._process_line(line.decode("utf-8", errors="replace"))
+                if not self._cancelled and buffer.strip():
+                    self._process_line(buffer.decode("utf-8", errors="replace"))
 
+            if self._cancelled:
+                return
             content, reasoning = split_thinking_text(
                 self._full_text,
                 self._reasoning_text,
@@ -525,9 +528,9 @@ class LLMStreamWorker(QThread):
 
     def _process_line(self, line: str):
         line = line.strip()
-        if not line.startswith("data: "):
+        if not line.startswith("data:"):
             return
-        data_str = line[6:]
+        data_str = line[5:].strip()
         if data_str == "[DONE]":
             return
         try:

@@ -1,6 +1,5 @@
 import json
 import random
-from pathlib import Path
 
 from PySide6.QtCore import Qt, QPoint, QRect, QTimer
 from PySide6.QtGui import QImage, QMouseEvent, QPainter, QPixmap
@@ -46,8 +45,12 @@ class PixelPetWidget(QWidget):
         self._frame_index = 0
         self._drag_locked = False
         self._dragging = False
+        self._drag_moved = False
+        self._pressed_on_sprite = False
         self._drag_start_x = 0
         self._drag_start_y = 0
+        self._drag_origin_x = 0
+        self._drag_origin_y = 0
         self._window_drag_callback = None
         self._click_callback = None
         self._right_click_callback = None
@@ -252,27 +255,50 @@ class PixelPetWidget(QWidget):
         if event.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(event)
             return
-        if self.is_sprite_hit_at_global(event.globalPosition().toPoint()):
-            self._dragging = True
-            gpos = event.globalPosition()
-            self._drag_start_x = gpos.x()
-            self._drag_start_y = gpos.y()
+        self._pressed_on_sprite = self.is_sprite_hit_at_global(event.globalPosition().toPoint())
+        if not self._pressed_on_sprite:
+            return
+        if self._drag_locked:
+            event.accept()
+            return
+        self._dragging = True
+        self._drag_moved = False
+        gpos = event.globalPosition()
+        self._drag_start_x = self._drag_origin_x = gpos.x()
+        self._drag_start_y = self._drag_origin_y = gpos.y()
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.RightButton:
             event.accept()
             return
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mouseReleaseEvent(event)
+            return
+        should_click = (
+            self._pressed_on_sprite
+            and not self._drag_moved
+            and self._click_callback
+            and self.is_sprite_hit_at_global(event.globalPosition().toPoint())
+        )
+        self._pressed_on_sprite = False
         if self._dragging:
             self._dragging = False
-        elif self._click_callback and self.is_sprite_hit_at_global(event.globalPosition().toPoint()):
+        if should_click:
             self._click_callback()
 
     def mouseMoveEvent(self, event: QMouseEvent):
-        if self._dragging and self._window_drag_callback:
-            gpos = event.globalPosition()
-            dx = int(gpos.x() - self._drag_start_x)
-            dy = int(gpos.y() - self._drag_start_y)
-            if dx != 0 or dy != 0:
-                self._window_drag_callback(dx, dy)
-                self._drag_start_x = gpos.x()
-                self._drag_start_y = gpos.y()
+        if self._drag_locked or not (self._dragging and self._window_drag_callback):
+            return
+        gpos = event.globalPosition()
+        if not self._drag_moved:
+            total_dx = gpos.x() - self._drag_origin_x
+            total_dy = gpos.y() - self._drag_origin_y
+            if total_dx * total_dx + total_dy * total_dy < 16:
+                return
+            self._drag_moved = True
+        dx = int(gpos.x() - self._drag_start_x)
+        dy = int(gpos.y() - self._drag_start_y)
+        if dx != 0 or dy != 0:
+            self._window_drag_callback(dx, dy)
+            self._drag_start_x = gpos.x()
+            self._drag_start_y = gpos.y()

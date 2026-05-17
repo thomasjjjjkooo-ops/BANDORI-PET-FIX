@@ -108,12 +108,15 @@ class ConfigManager:
         if self._path.exists():
             try:
                 with open(self._path, "r", encoding="utf-8") as f:
-                    loaded = json.load(f)
-                has_action_settings = isinstance(loaded, dict) and "model_action_settings" in loaded
+                    loaded_data = json.load(f)
+                loaded = loaded_data if isinstance(loaded_data, dict) else None
+                has_action_settings = loaded is not None and "model_action_settings" in loaded
+                if loaded is None:
+                    raise ValueError("config root must be a JSON object")
                 for k in DEFAULTS:
                     if k in loaded:
                         self._data[k] = loaded[k]
-            except (json.JSONDecodeError, OSError):
+            except (json.JSONDecodeError, OSError, ValueError):
                 pass
         if loaded is None or not has_action_settings:
             self._data["model_action_settings"] = {}
