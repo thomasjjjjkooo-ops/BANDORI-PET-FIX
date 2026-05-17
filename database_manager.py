@@ -17,6 +17,56 @@ _REQUIRED_COLUMNS = {
     "group_messages": {"id", "group_key", "conversation_id", "role", "content", "created_at"},
 }
 
+_VALID_MESSAGE_ROLES = {"user", "assistant", "system"}
+
+
+def _db_text(value, default: str = "") -> str:
+    if value is None:
+        return default
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _db_int(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _message_row_dict(row, grouped: bool = False) -> dict | None:
+    role = _db_text(row[3] if grouped else row[2]).strip()
+    if role not in _VALID_MESSAGE_ROLES:
+        return None
+
+    if grouped:
+        msg_id = _db_int(row[0])
+        if msg_id is None:
+            return None
+        return {
+            "id": msg_id,
+            "group_key": _db_text(row[1]),
+            "conversation_id": _db_text(row[2], "default") or "default",
+            "role": role,
+            "content": _db_text(row[4]),
+            "reasoning_content": _db_text(row[5]),
+            "created_at": _db_text(row[6]),
+        }
+
+    msg_id = _db_int(row[0])
+    conversation_id = _db_int(row[1])
+    if msg_id is None or conversation_id is None:
+        return None
+    return {
+        "id": msg_id,
+        "conversation_id": conversation_id,
+        "role": role,
+        "content": _db_text(row[3]),
+        "reasoning_content": _db_text(row[4]),
+        "created_at": _db_text(row[5]),
+    }
+
 
 def _same_path(a: str | os.PathLike, b: str | os.PathLike) -> bool:
     return Path(a).resolve() == Path(b).resolve()
@@ -218,10 +268,18 @@ class DatabaseManager:
                 "SELECT 1 FROM messages WHERE messages.conversation_id=conversations.id"
                 ") ORDER BY created_at DESC"
             ).fetchall()
-        return [
-            {"id": r[0], "character": r[1], "title": r[2], "created_at": r[3]}
-            for r in rows
-        ]
+        result = []
+        for r in rows:
+            conv_id = _db_int(r[0])
+            if conv_id is None:
+                continue
+            result.append({
+                "id": conv_id,
+                "character": _db_text(r[1]),
+                "title": _db_text(r[2]),
+                "created_at": _db_text(r[3]),
+            })
+        return result
 
     def get_last_conversation(self, character: str) -> dict | None:
         row = self._conn.execute(
@@ -232,7 +290,15 @@ class DatabaseManager:
             (character,)
         ).fetchone()
         if row:
-            return {"id": row[0], "character": row[1], "title": row[2], "created_at": row[3]}
+            conv_id = _db_int(row[0])
+            if conv_id is None:
+                return None
+            return {
+                "id": conv_id,
+                "character": _db_text(row[1]),
+                "title": _db_text(row[2]),
+                "created_at": _db_text(row[3]),
+            }
         return None
 
     def update_conversation_title(self, conv_id: int, title: str):
@@ -257,11 +323,12 @@ class DatabaseManager:
             "WHERE conversation_id=? ORDER BY id ASC",
             (conversation_id,)
         ).fetchall()
-        return [
-            {"id": r[0], "conversation_id": r[1], "role": r[2],
-             "content": r[3], "reasoning_content": r[4], "created_at": r[5]}
-            for r in rows
-        ]
+        result = []
+        for r in rows:
+            message = _message_row_dict(r)
+            if message is not None:
+                result.append(message)
+        return result
 
     def add_group_message(self, group_key: str, conversation_id: str, role: str, content: str, reasoning_content: str = "") -> int:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -273,16 +340,18 @@ class DatabaseManager:
         return cur.lastrowid
 
     def get_group_messages(self, group_key: str, conversation_id: str) -> list[dict]:
+        conversation_id = conversation_id or "default"
         rows = self._conn.execute(
             "SELECT id, group_key, conversation_id, role, content, reasoning_content, created_at FROM group_messages "
-            "WHERE group_key=? AND conversation_id=? ORDER BY id ASC",
-            (group_key, conversation_id or "default")
+            "WHERE group_key=? AND (conversation_id=? OR CAST(conversation_id AS TEXT)=?) ORDER BY id ASC",
+            (group_key, conversation_id, conversation_id)
         ).fetchall()
-        return [
-            {"id": r[0], "group_key": r[1], "conversation_id": r[2], "role": r[3],
-             "content": r[4], "reasoning_content": r[5], "created_at": r[6]}
-            for r in rows
-        ]
+        result = []
+        for r in rows:
+            message = _message_row_dict(r, grouped=True)
+            if message is not None:
+                result.append(message)
+        return result
 
     def get_group_conversations(self, group_key: str) -> list[dict]:
         rows = self._conn.execute(
@@ -293,6 +362,12 @@ class DatabaseManager:
         result = []
         seen = set()
         for conversation_id, msg_id, role, content, created_at in rows:
+            conversation_id = _db_text(conversation_id, "default") or "default"
+            if _db_text(role).strip() not in _VALID_MESSAGE_ROLES:
+                continue
+            msg_id = _db_int(msg_id)
+            if msg_id is None:
+                continue
             if conversation_id in seen:
                 continue
             seen.add(conversation_id)
@@ -300,9 +375,9 @@ class DatabaseManager:
                 "group_key": group_key,
                 "conversation_id": conversation_id,
                 "message_id": msg_id,
-                "role": role,
-                "content": content,
-                "created_at": created_at,
+                "role": _db_text(role).strip(),
+                "content": _db_text(content),
+                "created_at": _db_text(created_at),
             })
         return result
 
@@ -314,6 +389,13 @@ class DatabaseManager:
         result = []
         seen = set()
         for group_key, conversation_id, msg_id, role, content, created_at in rows:
+            group_key = _db_text(group_key)
+            conversation_id = _db_text(conversation_id, "default") or "default"
+            if _db_text(role).strip() not in _VALID_MESSAGE_ROLES:
+                continue
+            msg_id = _db_int(msg_id)
+            if msg_id is None:
+                continue
             if group_key in seen:
                 continue
             seen.add(group_key)
@@ -321,9 +403,9 @@ class DatabaseManager:
                 "group_key": group_key,
                 "conversation_id": conversation_id,
                 "message_id": msg_id,
-                "role": role,
-                "content": content,
-                "created_at": created_at,
+                "role": _db_text(role).strip(),
+                "content": _db_text(content),
+                "created_at": _db_text(created_at),
             })
         return result
 
@@ -332,7 +414,7 @@ class DatabaseManager:
             "SELECT display_name FROM group_chat_meta WHERE group_key=?",
             (group_key,)
         ).fetchone()
-        return row[0] if row else ""
+        return _db_text(row[0]) if row else ""
 
     def set_group_display_name(self, group_key: str, display_name: str):
         name = display_name.strip()

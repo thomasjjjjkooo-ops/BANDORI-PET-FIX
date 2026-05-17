@@ -1876,7 +1876,7 @@ class ChatWindow(QWidget):
                     action.setCheckable(True)
                     action.setChecked(conv["conversation_id"] == self._group_conv_id)
                     action.triggered.connect(
-                        lambda _checked=False, conv_id=conv["conversation_id"]: self._switch_group_conversation(conv_id)
+                        lambda _checked=False, conv_id=conv["conversation_id"]: self._defer_group_conversation_switch(conv_id)
                     )
             else:
                 empty = menu.addAction(_tr("ChatWindow.no_convs"))
@@ -1995,10 +1995,19 @@ class ChatWindow(QWidget):
         menu.exec(pos)
 
     def _select_history_row(self, menu: QMenu, conv_id: int):
+        QTimer.singleShot(0, lambda menu=menu, conv_id=conv_id: self._close_menu_and_switch_conversation(menu, conv_id))
+
+    def _defer_group_conversation_switch(self, conversation_id: str):
+        QTimer.singleShot(0, lambda conversation_id=conversation_id: self._switch_group_conversation(conversation_id))
+
+    def _delete_history_row(self, menu: QMenu, conv_id: int):
+        QTimer.singleShot(0, lambda menu=menu, conv_id=conv_id: self._close_menu_and_delete_conversation(menu, conv_id))
+
+    def _close_menu_and_switch_conversation(self, menu: QMenu, conv_id: int):
         menu.close()
         self._switch_conversation(conv_id)
 
-    def _delete_history_row(self, menu: QMenu, conv_id: int):
+    def _close_menu_and_delete_conversation(self, menu: QMenu, conv_id: int):
         menu.close()
         self._delete_conversation(conv_id)
 
