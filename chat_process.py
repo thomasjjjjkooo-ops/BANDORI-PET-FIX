@@ -40,7 +40,7 @@ def main():
         macos_patch.hide_dock_icon()
     app.setApplicationName("BandoriPetChat")
     app.setOrganizationName("BandoriPet")
-    app.setQuitOnLastWindowClosed(True)
+    app.setQuitOnLastWindowClosed(False)
 
     apply_app_theme(cfg.get("dark_theme", False))
 
