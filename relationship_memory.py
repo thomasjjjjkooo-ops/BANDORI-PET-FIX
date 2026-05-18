@@ -1,5 +1,7 @@
 import re
 
+from i18n_manager import tr as _tr
+
 
 DEFAULT_USER_KEY = "__default__"
 
@@ -92,21 +94,24 @@ def display_user_name(user_key: str) -> str:
 
 
 def mood_label(mood: str) -> str:
-    return MOOD_LABELS.get(str(mood or "").strip(), mood or "平静")
+    if not mood:
+        return _tr("Relationship.mood_calm", "平静")
+    key = str(mood).strip()
+    return _tr(f"Relationship.mood_{key}", MOOD_LABELS.get(key, key))
 
 
 def affection_label(value: int) -> str:
     if value >= 85:
-        return "非常亲近"
+        return _tr("Relationship.affection_very_close", "非常亲近")
     if value >= 70:
-        return "亲近"
+        return _tr("Relationship.affection_close", "亲近")
     if value >= 55:
-        return "熟悉"
+        return _tr("Relationship.affection_familiar", "熟悉")
     if value >= 40:
-        return "普通"
+        return _tr("Relationship.affection_normal", "普通")
     if value >= 25:
-        return "疏离"
-    return "紧张"
+        return _tr("Relationship.affection_distant", "疏离")
+    return _tr("Relationship.affection_tense", "紧张")
 
 
 def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
@@ -218,25 +223,26 @@ def analyze_interaction(user_text: str, assistant_text: str = "", actions: list[
 def build_relationship_context(db, character: str, user_key: str, display_name: str = "") -> str:
     state = db.get_relationship_state(character, user_key)
     memories = db.get_character_memories(character, user_key, limit=8)
-    user_label = display_name or display_user_name(user_key) or "当前用户"
+    user_label = display_name or display_user_name(user_key) or _tr("Relationship.default_user", "当前用户")
     lines = [
-        "【长期记忆与关系状态】",
-        "这些内容是程序保存的长期互动状态。把它当作背景，只在自然相关时使用，不要主动逐条复述。",
-        f"互动对象：{user_label}",
-        (
-            f"关系：好感度 {state['affection']}/100（{affection_label(state['affection'])}），"
-            f"信任 {state['trust']}/100，熟悉度 {state['familiarity']}/100。"
-        ),
-        f"当前心情：{mood_label(state['mood'])}，强度 {state['mood_intensity']}/100。",
+        _tr("Relationship.context_title", "【长期记忆与关系状态】"),
+        _tr("Relationship.context_instruction", "这些内容是程序保存的长期互动状态。把它当作背景，只在自然相关时使用，不要主动逐条复述。"),
+        _tr("Relationship.context_object", "互动对象：{user_label}", user_label=user_label),
+        _tr("Relationship.context_relationship",
+            "关系：好感度 {affection}/100（{affection_label}），信任 {trust}/100，熟悉度 {familiarity}/100。",
+            affection=state['affection'], affection_label=affection_label(state['affection']),
+            trust=state['trust'], familiarity=state['familiarity']),
+        _tr("Relationship.context_mood", "当前心情：{mood}，强度 {intensity}/100。",
+            mood=mood_label(state['mood']), intensity=state['mood_intensity']),
     ]
     if memories:
-        lines.append("长期记忆：")
+        lines.append(_tr("Relationship.context_memories_label", "长期记忆："))
         for memory in memories:
-            kind = MEMORY_KIND_LABELS.get(memory["kind"], memory["kind"])
+            kind = _tr(f"Relationship.kind_{memory['kind']}", MEMORY_KIND_LABELS.get(memory["kind"], memory["kind"]))
             lines.append(f"- {kind}：{memory['content']}")
     else:
-        lines.append("长期记忆：暂无明确记录。")
-    lines.append("互动要求：随着好感、信任和心情变化调整语气亲近度，但仍必须保持角色本人的性格边界。")
+        lines.append(_tr("Relationship.context_memories_empty", "长期记忆：暂无明确记录。"))
+    lines.append(_tr("Relationship.context_instruction_footer", "互动要求：随着好感、信任和心情变化调整语气亲近度，但仍必须保持角色本人的性格边界。"))
     return "\n".join(lines)
 
 
@@ -245,17 +251,19 @@ def format_character_status(db, character: str, user_key: str, display_name: str
     memories = db.get_character_memories(character, user_key, limit=limit)
     title = display_name or character
     lines = [
-        f"【{title} 的长期状态】",
-        f"好感度：{state['affection']}/100（{affection_label(state['affection'])}）",
-        f"信任：{state['trust']}/100",
-        f"熟悉度：{state['familiarity']}/100",
-        f"当前心情：{mood_label(state['mood'])}（{state['mood_intensity']}/100）",
+        _tr("Relationship.status_title", "【{title} 的长期状态】", title=title),
+        _tr("SettingsWindow.memory_affection_value", "{value}/100（{label}）",
+            value=state['affection'], label=affection_label(state['affection'])),
+        _tr("Relationship.status_trust", "信任：{value}/100", value=state['trust']),
+        _tr("Relationship.status_familiarity", "熟悉度：{value}/100", value=state['familiarity']),
+        _tr("SettingsWindow.memory_mood_value", "{mood}（{value}/100）",
+            mood=mood_label(state['mood']), value=state['mood_intensity']),
     ]
     if memories:
-        lines.append("记住的事：")
+        lines.append(_tr("Relationship.status_memories_label", "记住的事："))
         for memory in memories:
-            kind = MEMORY_KIND_LABELS.get(memory["kind"], memory["kind"])
+            kind = _tr(f"Relationship.kind_{memory['kind']}", MEMORY_KIND_LABELS.get(memory["kind"], memory["kind"]))
             lines.append(f"- {kind}：{memory['content']}")
     else:
-        lines.append("记住的事：暂无。")
+        lines.append(_tr("Relationship.status_memories_empty", "记住的事：暂无。"))
     return "\n".join(lines)
