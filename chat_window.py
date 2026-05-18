@@ -1,5 +1,5 @@
 import fluent_bootstrap  # noqa: F401
-from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QRect, QRectF, QSize, QVariantAnimation, QParallelAnimationGroup
+from PySide6.QtCore import Qt, QObject, QThread, Signal, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QRect, QRectF, QSize, QVariantAnimation, QParallelAnimationGroup
 from PySide6.QtGui import QFont, QColor, QPalette, QIcon, QKeyEvent, QPainter, QPainterPath, QPen, QPixmap, QImage
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -52,7 +52,37 @@ from llm_manager import (
     build_system_prompt, LLMStreamWorker, ResponsesStreamWorker, NonStreamWorker,
     parse_action_tags, strip_action_tags,
 )
-from tts_manager import TTSPlayer, TTSRequestWorker, TTSTranslationWorker, flush_tts_sentence, strip_tts_action_tags
+try:
+    from tts_manager import TTSPlayer, TTSRequestWorker, TTSTranslationWorker, flush_tts_sentence, strip_tts_action_tags
+    _TTS_AVAILABLE = True
+except ImportError:
+    _TTS_AVAILABLE = False
+
+    class TTSPlayer(QObject):
+        level_changed = Signal(float)
+        playback_finished = Signal()
+        def enqueue(self, audio, media_type): pass
+        def stop(self): pass
+        def is_idle(self): return True
+
+    class TTSRequestWorker(QThread):
+        audio_ready = Signal(int, int, bytes, str)
+        error = Signal(str)
+        finished = Signal()
+        def run(self): pass
+
+    class TTSTranslationWorker(QThread):
+        translated = Signal(int, int, str, str)
+        error = Signal(str)
+        finished = Signal()
+        def run(self): pass
+
+    def flush_tts_sentence(buffer: str) -> str:
+        return buffer.strip()
+
+    def strip_tts_action_tags(text: str) -> str:
+        import re as _re
+        return _re.sub(r"\[(?:DONE|[A-Za-z0-9_.\-]+)\]", "", text).strip()
 from relationship_memory import (
     analyze_interaction,
     build_relationship_context,
