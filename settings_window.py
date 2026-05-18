@@ -17,7 +17,13 @@ from qfluentwidgets import (
     FluentIcon, Slider, SwitchButton, ScrollArea, ComboBox, LineEdit,
     isDarkTheme, InfoBar, InfoBarPosition,
 )
-from qfluentwidgets.components.widgets.menu import LineEditMenu, TextEditMenu
+from qfluentwidgets.components.widgets.combo_box import ComboBoxMenu
+from qfluentwidgets.components.widgets.menu import (
+    LineEditMenu,
+    MenuAnimationManager,
+    MenuAnimationType,
+    TextEditMenu,
+)
 from qfluentwidgets.common.config import qconfig
 
 from i18n_manager import tr as _tr, set_language, available_languages, current_language
@@ -67,6 +73,16 @@ _ROLEPLAY_STATUS_TIPS = {
 
 PROJECT_REPO_URL = "https://github.com/HELPMEEADICE/BANDORI-PET-REV"
 PROJECT_LICENSE_URL = f"{PROJECT_REPO_URL}/blob/main/LICENSE"
+CLICK_MOTION_CONFIG_FORMAT = "bandori-click-motion-actions"
+CLICK_MOTION_CONFIG_VERSION = 1
+CLICK_MOTION_SCOPE_ALL = "all_models"
+CLICK_MOTION_SCOPE_CHARACTER = "current_character"
+CLICK_MOTION_SCOPE_COSTUME = "current_costume"
+CLICK_MOTION_SCOPES = {
+    CLICK_MOTION_SCOPE_ALL,
+    CLICK_MOTION_SCOPE_CHARACTER,
+    CLICK_MOTION_SCOPE_COSTUME,
+}
 
 
 def _app_icon_path() -> str:
@@ -88,6 +104,48 @@ class FluentContextTextEdit(QTextEdit):
     def contextMenuEvent(self, event):
         menu = TextEditMenu(self)
         menu.exec(event.globalPos(), ani=True)
+
+
+class OpaqueDropDownComboBox(ComboBox):
+    def _createComboMenu(self):
+        return OpaqueDropDownComboBoxMenu(self)
+
+
+class OpaqueDropDownComboBoxMenu(ComboBoxMenu):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        dark = isDarkTheme()
+        bg = "#2b2b2b" if dark else "#ffffff"
+        border = "#4a4a4a" if dark else "#d8d8d8"
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, False)
+        self.setAutoFillBackground(True)
+        palette = self.palette()
+        palette.setColor(QPalette.ColorRole.Window, QColor(bg))
+        self.setPalette(palette)
+        self.hBoxLayout.setContentsMargins(0, 0, 0, 0)
+        self.view.setGraphicsEffect(None)
+        self.view.setStyleSheet(
+            self.view.styleSheet()
+            + f"""
+            QListWidget#comboListWidget {{
+                background: {bg};
+                border: 1px solid {border};
+                border-radius: 8px;
+            }}
+            """
+        )
+
+    def exec(self, pos, ani=True, aniType=MenuAnimationType.DROP_DOWN):
+        self.view.adjustSize(pos, aniType)
+        self.adjustSize()
+        if not ani:
+            aniType = MenuAnimationType.NONE
+        self.aniManager = MenuAnimationManager.make(self, aniType)
+        self.aniManager.exec(pos)
+        self.show()
+        if getattr(self, "isSubMenu", False) and getattr(self, "menuItem", None):
+            self.menuItem.setSelected(True)
 
 
 def _clamp_live2d_scale(value) -> int:
@@ -1271,7 +1329,7 @@ class SettingsWindow(QWidget):
         action_col.addWidget(motion_label)
         motion_row = QHBoxLayout()
         motion_row.setSpacing(8)
-        self._default_motion_combo = ComboBox(action_container)
+        self._default_motion_combo = OpaqueDropDownComboBox(action_container)
         self._default_motion_combo.setMinimumWidth(190)
         self._default_motion_combo.currentIndexChanged.connect(self._on_default_motion_changed)
         motion_row.addWidget(self._default_motion_combo, 1)
@@ -1285,7 +1343,7 @@ class SettingsWindow(QWidget):
         action_col.addWidget(expression_label)
         expression_row = QHBoxLayout()
         expression_row.setSpacing(8)
-        self._default_expression_combo = ComboBox(action_container)
+        self._default_expression_combo = OpaqueDropDownComboBox(action_container)
         self._default_expression_combo.setMinimumWidth(190)
         self._default_expression_combo.currentIndexChanged.connect(self._on_default_expression_changed)
         expression_row.addWidget(self._default_expression_combo, 1)
@@ -1314,13 +1372,13 @@ class SettingsWindow(QWidget):
             row = index * 2 + 1
             label = BodyLabel(_tr(f"SettingsWindow.click_motion_region_{region}"), click_grid_widget)
             label.setWordWrap(True)
-            combo = ComboBox(click_grid_widget)
+            combo = OpaqueDropDownComboBox(click_grid_widget)
             combo.setMinimumWidth(135)
             combo.setMaximumWidth(140)
             combo.currentIndexChanged.connect(
                 lambda index, r=region: self._on_click_motion_changed(r, index)
             )
-            expression_combo = ComboBox(click_grid_widget)
+            expression_combo = OpaqueDropDownComboBox(click_grid_widget)
             expression_combo.setMinimumWidth(135)
             expression_combo.setMaximumWidth(140)
             expression_combo.currentIndexChanged.connect(
@@ -1338,6 +1396,44 @@ class SettingsWindow(QWidget):
         self._click_motion_reset_btn = PushButton(_tr("SettingsWindow.click_motion_reset"), action_container)
         self._click_motion_reset_btn.clicked.connect(self._reset_click_motions)
         action_col.addWidget(self._click_motion_reset_btn, 0, Qt.AlignmentFlag.AlignRight)
+
+        click_scope_label = _wrap_label(BodyLabel(_tr("SettingsWindow.click_motion_scope_label"), action_container))
+        click_scope_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        action_col.addWidget(click_scope_label)
+        self._click_motion_scope_combo = OpaqueDropDownComboBox(action_container)
+        self._click_motion_scope_combo.setMinimumWidth(260)
+        self._click_motion_scope_combo.addItem(
+            _tr("SettingsWindow.click_motion_scope_all"),
+            userData=CLICK_MOTION_SCOPE_ALL,
+        )
+        self._click_motion_scope_combo.addItem(
+            _tr("SettingsWindow.click_motion_scope_character"),
+            userData=CLICK_MOTION_SCOPE_CHARACTER,
+        )
+        self._click_motion_scope_combo.addItem(
+            _tr("SettingsWindow.click_motion_scope_costume"),
+            userData=CLICK_MOTION_SCOPE_COSTUME,
+        )
+        self._click_motion_scope_combo.setCurrentIndex(2)
+        action_col.addWidget(self._click_motion_scope_combo, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        click_import_export_row = QHBoxLayout()
+        click_import_export_row.setSpacing(8)
+        self._click_motion_import_btn = PushButton(
+            FluentIcon.SYNC,
+            _tr("SettingsWindow.click_motion_import"),
+            action_container,
+        )
+        self._click_motion_import_btn.clicked.connect(self._import_click_motion_config)
+        self._click_motion_export_btn = PushButton(
+            FluentIcon.SAVE,
+            _tr("SettingsWindow.click_motion_export"),
+            action_container,
+        )
+        self._click_motion_export_btn.clicked.connect(self._export_click_motion_config)
+        click_import_export_row.addWidget(self._click_motion_import_btn)
+        click_import_export_row.addWidget(self._click_motion_export_btn)
+        action_col.addLayout(click_import_export_row)
         action_scroll.setWidget(action_container)
 
         detail_center.addWidget(self._detail_card, 0, Qt.AlignmentFlag.AlignTop)
@@ -1350,6 +1446,7 @@ class SettingsWindow(QWidget):
         self._detail_expression_label = expression_label
         self._detail_click_motion_label = click_label
         self._detail_click_motion_hint = click_hint
+        self._detail_click_motion_scope_label = click_scope_label
         self._detail_action_scroll = action_scroll
         self._update_switch_button_style()
         qconfig.themeChanged.connect(self._update_switch_button_style)
@@ -1377,6 +1474,7 @@ class SettingsWindow(QWidget):
         self._detail_expression_label.setStyleSheet(f"color: {hint_color};")
         self._detail_click_motion_label.setStyleSheet(f"color: {hint_color};")
         self._detail_click_motion_hint.setStyleSheet(f"color: {hint_color};")
+        self._detail_click_motion_scope_label.setStyleSheet(f"color: {hint_color};")
         self._switch_model_btn.setStyleSheet(f"""
             QPushButton {{
                 color: #ffffff;
@@ -1605,6 +1703,435 @@ class SettingsWindow(QWidget):
         self._populate_click_motion_combos(item)
         self._save_configured_models()
 
+    def _current_click_motion_scope(self) -> str:
+        if not hasattr(self, "_click_motion_scope_combo"):
+            return CLICK_MOTION_SCOPE_COSTUME
+        scope = self._click_motion_scope_combo.itemData(
+            self._click_motion_scope_combo.currentIndex()
+        )
+        return scope if scope in CLICK_MOTION_SCOPES else CLICK_MOTION_SCOPE_COSTUME
+
+    @staticmethod
+    def _click_motion_profile_key(character: str, costume: str) -> str:
+        return f"{character}\t{costume}"
+
+    @staticmethod
+    def _split_click_motion_profile_key(key: str) -> tuple[str, str]:
+        parts = str(key or "").split("\t", 1)
+        if len(parts) == 2:
+            return parts[0], parts[1]
+        return "", ""
+
+    @staticmethod
+    def _looks_like_click_motion_actions(value) -> bool:
+        return isinstance(value, dict) and any(
+            str(region) in CLICK_MOTION_REGIONS for region in value
+        )
+
+    def _selected_click_motion_pair(self) -> tuple[str, str]:
+        item = self._selected_model_item()
+        if not item:
+            return "", ""
+        return item.get("character", ""), item.get("costume", "")
+
+    def _click_motion_scope_display(self, scope: str) -> str:
+        key = {
+            CLICK_MOTION_SCOPE_ALL: "SettingsWindow.click_motion_scope_all",
+            CLICK_MOTION_SCOPE_CHARACTER: "SettingsWindow.click_motion_scope_character",
+            CLICK_MOTION_SCOPE_COSTUME: "SettingsWindow.click_motion_scope_costume",
+        }.get(scope, "SettingsWindow.click_motion_scope_costume")
+        return _tr(key)
+
+    def _default_click_motion_config_path(self) -> str:
+        name = "bandori-click-actions-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".json"
+        return str(app_base_dir() / name)
+
+    def _known_click_motion_model(self, character: str, costume: str) -> bool:
+        return bool(
+            character
+            and costume
+            and self._model_manager.get_model_json_path(character, costume)
+        )
+
+    def _normalize_click_actions_for_model(self, character: str, costume: str, actions) -> dict:
+        motions = self._model_manager.get_motion_names(character, costume)
+        expressions = self._model_manager.get_expression_names(character, costume)
+        return normalize_click_motion_actions(actions, motions, expressions)
+
+    def _click_motion_profile_from_item(self, item: dict) -> dict | None:
+        character = item.get("character", "")
+        costume = item.get("costume", "")
+        if not self._known_click_motion_model(character, costume):
+            return None
+        return {
+            "character": character,
+            "costume": costume,
+            "click_motion_actions": self._normalize_click_actions_for_model(
+                character,
+                costume,
+                item.get("click_motion_actions", {}),
+            ),
+        }
+
+    def _stored_click_motion_profiles(self) -> dict[str, dict]:
+        profiles: dict[str, dict] = {}
+        raw_profiles = self._cfg.get("model_action_settings", {}) if self._cfg else {}
+        if isinstance(raw_profiles, dict):
+            for key, profile in raw_profiles.items():
+                if not isinstance(profile, dict) or "click_motion_actions" not in profile:
+                    continue
+                character, costume = self._split_click_motion_profile_key(key)
+                if not self._known_click_motion_model(character, costume):
+                    continue
+                actions = self._normalize_click_actions_for_model(
+                    character,
+                    costume,
+                    profile.get("click_motion_actions", {}),
+                )
+                if actions:
+                    profiles[self._click_motion_profile_key(character, costume)] = {
+                        "character": character,
+                        "costume": costume,
+                        "click_motion_actions": actions,
+                    }
+
+        for item in self._configured_models:
+            profile = self._click_motion_profile_from_item(item)
+            if profile and profile["click_motion_actions"]:
+                profiles[
+                    self._click_motion_profile_key(profile["character"], profile["costume"])
+                ] = profile
+        return profiles
+
+    def _collect_click_motion_profiles(self, scope: str) -> dict[str, dict]:
+        profiles = self._stored_click_motion_profiles()
+        character, costume = self._selected_click_motion_pair()
+        current = self._click_motion_profile_from_item(self._selected_model_item() or {})
+        current_key = self._click_motion_profile_key(character, costume) if current else ""
+
+        if scope == CLICK_MOTION_SCOPE_COSTUME:
+            return {current_key: current} if current else {}
+
+        if scope == CLICK_MOTION_SCOPE_CHARACTER:
+            filtered = {
+                key: profile
+                for key, profile in profiles.items()
+                if profile.get("character") == character
+            }
+            if current:
+                filtered[current_key] = current
+            return filtered
+
+        if current:
+            profiles[current_key] = current
+        return profiles
+
+    def _export_click_motion_config(self):
+        scope = self._current_click_motion_scope()
+        if self._cfg:
+            self._save_configured_models()
+        profiles = self._collect_click_motion_profiles(scope)
+        if not profiles:
+            InfoBar.warning(
+                _tr("SettingsWindow.click_motion_export_empty_title"),
+                _tr("SettingsWindow.click_motion_export_empty_content"),
+                duration=2500,
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+
+        path, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            _tr("SettingsWindow.click_motion_export_dialog"),
+            self._default_click_motion_config_path(),
+            _tr("SettingsWindow.click_motion_config_filter"),
+        )
+        if not path:
+            return
+        if not os.path.splitext(path)[1]:
+            path += ".json"
+
+        current_character, current_costume = self._selected_click_motion_pair()
+        payload = {
+            "format": CLICK_MOTION_CONFIG_FORMAT,
+            "version": CLICK_MOTION_CONFIG_VERSION,
+            "scope": scope,
+            "exported_at": datetime.now().isoformat(timespec="seconds"),
+            "source": {
+                "character": current_character,
+                "costume": current_costume,
+            },
+            "profiles": [
+                profiles[key]
+                for key in sorted(
+                    profiles,
+                    key=lambda value: (
+                        profiles[value].get("character", ""),
+                        profiles[value].get("costume", ""),
+                    ),
+                )
+            ],
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False)
+        except Exception as exc:
+            self._show_click_motion_config_error(exc)
+            return
+
+        InfoBar.success(
+            _tr("SettingsWindow.click_motion_export_success_title"),
+            _tr(
+                "SettingsWindow.click_motion_export_success_content",
+                count=len(profiles),
+            ),
+            duration=2500,
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _import_click_motion_config(self):
+        path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            _tr("SettingsWindow.click_motion_import_dialog"),
+            str(app_base_dir()),
+            _tr("SettingsWindow.click_motion_config_filter"),
+        )
+        if not path:
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            imported = self._extract_click_motion_profiles(payload)
+        except Exception as exc:
+            self._show_click_motion_config_error(exc)
+            return
+
+        if not imported:
+            InfoBar.warning(
+                _tr("SettingsWindow.click_motion_import_empty_title"),
+                _tr("SettingsWindow.click_motion_import_empty_content"),
+                duration=2500,
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+
+        scope = self._current_click_motion_scope()
+        reply = QMessageBox.warning(
+            self,
+            _tr("SettingsWindow.click_motion_import_confirm_title"),
+            _tr(
+                "SettingsWindow.click_motion_import_confirm_content",
+                scope=self._click_motion_scope_display(scope),
+                count=len(imported),
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        applied = self._apply_imported_click_motion_profiles(imported, scope)
+        if not applied:
+            InfoBar.warning(
+                _tr("SettingsWindow.click_motion_import_no_match_title"),
+                _tr("SettingsWindow.click_motion_import_no_match_content"),
+                duration=3000,
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
+            return
+
+        self._save_configured_models()
+        item = self._selected_model_item()
+        if item:
+            self._populate_click_motion_combos(item)
+        InfoBar.success(
+            _tr("SettingsWindow.click_motion_import_success_title"),
+            _tr(
+                "SettingsWindow.click_motion_import_success_content",
+                count=applied,
+            ),
+            duration=3000,
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
+    def _extract_click_motion_profiles(self, payload) -> list[dict]:
+        if not isinstance(payload, dict):
+            return []
+
+        extracted: dict[tuple[str, str], dict] = {}
+        current_character, current_costume = self._selected_click_motion_pair()
+        source = payload.get("source", {})
+        if not isinstance(source, dict):
+            source = {}
+        default_character = str(
+            payload.get("character") or source.get("character") or current_character or ""
+        )
+        default_costume = str(
+            payload.get("costume") or source.get("costume") or current_costume or ""
+        )
+
+        def add_profile(character, costume, actions, allow_empty: bool = False):
+            character = str(character or "").strip()
+            costume = str(costume or "").strip()
+            if not character or not costume:
+                return
+            normalized = normalize_click_motion_actions(actions)
+            if not normalized and not allow_empty:
+                return
+            extracted[(character, costume)] = {
+                "character": character,
+                "costume": costume,
+                "click_motion_actions": normalized,
+            }
+
+        raw_profiles = payload.get("profiles")
+        if isinstance(raw_profiles, list):
+            for profile in raw_profiles:
+                if not isinstance(profile, dict):
+                    continue
+                actions = profile.get("click_motion_actions")
+                if actions is None:
+                    actions = profile.get("actions")
+                if actions is None and self._looks_like_click_motion_actions(profile):
+                    actions = profile
+                if actions is None:
+                    continue
+                add_profile(
+                    profile.get("character") or default_character,
+                    profile.get("costume") or default_costume,
+                    actions,
+                    allow_empty=True,
+                )
+        elif isinstance(raw_profiles, dict):
+            for key, profile in raw_profiles.items():
+                key_character, key_costume = self._split_click_motion_profile_key(key)
+                if not isinstance(profile, dict):
+                    continue
+                actions = profile.get("click_motion_actions")
+                if actions is None:
+                    actions = profile.get("actions")
+                if actions is None and self._looks_like_click_motion_actions(profile):
+                    actions = profile
+                if actions is None:
+                    continue
+                add_profile(
+                    profile.get("character") or key_character or default_character,
+                    profile.get("costume") or key_costume or default_costume,
+                    actions,
+                    allow_empty=True,
+                )
+
+        raw_models = payload.get("models")
+        if isinstance(raw_models, list):
+            for item in raw_models:
+                if not isinstance(item, dict) or "click_motion_actions" not in item:
+                    continue
+                add_profile(
+                    item.get("character"),
+                    item.get("costume"),
+                    item.get("click_motion_actions"),
+                )
+
+        raw_action_settings = payload.get("model_action_settings")
+        if isinstance(raw_action_settings, dict):
+            for key, profile in raw_action_settings.items():
+                if not isinstance(profile, dict) or "click_motion_actions" not in profile:
+                    continue
+                character, costume = self._split_click_motion_profile_key(key)
+                add_profile(character, costume, profile.get("click_motion_actions"))
+
+        root_actions = payload.get("click_motion_actions")
+        if root_actions is None:
+            root_actions = payload.get("actions")
+        if root_actions is not None:
+            add_profile(default_character, default_costume, root_actions, allow_empty=True)
+
+        return list(extracted.values())
+
+    def _apply_imported_click_motion_profiles(self, imported: list[dict], scope: str) -> int:
+        if not self._cfg:
+            return 0
+        updates: dict[tuple[str, str], dict] = {}
+        current_character, current_costume = self._selected_click_motion_pair()
+
+        if scope == CLICK_MOTION_SCOPE_COSTUME:
+            profile = self._select_click_motion_import_for_current_costume(
+                imported,
+                current_character,
+                current_costume,
+            )
+            if profile:
+                updates[(current_character, current_costume)] = profile["click_motion_actions"]
+        elif scope == CLICK_MOTION_SCOPE_CHARACTER:
+            for profile in imported:
+                character = profile.get("character", "")
+                costume = profile.get("costume", "")
+                if character != current_character:
+                    continue
+                if self._known_click_motion_model(character, costume):
+                    updates[(character, costume)] = profile["click_motion_actions"]
+        else:
+            for profile in imported:
+                character = profile.get("character", "")
+                costume = profile.get("costume", "")
+                if self._known_click_motion_model(character, costume):
+                    updates[(character, costume)] = profile["click_motion_actions"]
+
+        applied = 0
+        for (character, costume), actions in updates.items():
+            if self._apply_click_motion_actions_to_model(character, costume, actions):
+                applied += 1
+        return applied
+
+    def _select_click_motion_import_for_current_costume(
+        self,
+        imported: list[dict],
+        current_character: str,
+        current_costume: str,
+    ) -> dict | None:
+        if not current_character or not current_costume:
+            return None
+        exact = [
+            profile for profile in imported
+            if profile.get("character") == current_character
+            and profile.get("costume") == current_costume
+        ]
+        if exact:
+            return exact[0]
+        if len(imported) == 1:
+            return imported[0]
+        return None
+
+    def _apply_click_motion_actions_to_model(self, character: str, costume: str, actions) -> bool:
+        if not self._known_click_motion_model(character, costume):
+            return False
+        normalized = self._normalize_click_actions_for_model(character, costume, actions)
+        profile = self._cfg.get_model_action_profile(character, costume)
+        if normalized:
+            profile["click_motion_actions"] = normalized
+        else:
+            profile.pop("click_motion_actions", None)
+        self._cfg.set_model_action_profile(character, costume, profile)
+        for item in self._configured_models:
+            if item.get("character") == character and item.get("costume") == costume:
+                item["click_motion_actions"] = normalized
+        return True
+
+    def _show_click_motion_config_error(self, exc: Exception):
+        InfoBar.error(
+            _tr("SettingsWindow.click_motion_config_failed_title"),
+            str(exc),
+            duration=4000,
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+
     def _enter_model_selection(self):
         self._selecting_model = True
         self._model_detail_widget.hide()
@@ -1812,7 +2339,7 @@ class SettingsWindow(QWidget):
 
         thinking_label = BodyLabel(_tr("SettingsWindow.llm_enable_thinking"), page)
         layout.addWidget(thinking_label)
-        self._llm_enable_thinking = ComboBox(page)
+        self._llm_enable_thinking = OpaqueDropDownComboBox(page)
         self._llm_enable_thinking.addItems([
             _tr("SettingsWindow.llm_enable_thinking_default"),
             _tr("SettingsWindow.llm_enable_thinking_on"),
@@ -1948,7 +2475,7 @@ class SettingsWindow(QWidget):
 
         mode_label = BodyLabel(_tr("SettingsWindow.pov_mode"), page)
         layout.addWidget(mode_label)
-        self._pov_mode = ComboBox(page)
+        self._pov_mode = OpaqueDropDownComboBox(page)
         self._pov_mode.addItem(_tr("SettingsWindow.pov_mode_off"), userData="off")
         self._pov_mode.addItem(_tr("SettingsWindow.pov_mode_custom"), userData="custom")
         self._pov_mode.addItem(_tr("SettingsWindow.pov_mode_role"), userData="role")
@@ -1969,7 +2496,7 @@ class SettingsWindow(QWidget):
         layout.addWidget(persona_label)
         persona_row = QHBoxLayout()
         persona_row.setSpacing(8)
-        self._pov_persona_combo = ComboBox(page)
+        self._pov_persona_combo = OpaqueDropDownComboBox(page)
         self._pov_persona_combo.setFixedHeight(36)
         self._pov_persona_combo.currentIndexChanged.connect(self._on_pov_persona_selected)
         persona_row.addWidget(self._pov_persona_combo, 1)
@@ -1985,7 +2512,7 @@ class SettingsWindow(QWidget):
 
         role_label = BodyLabel(_tr("SettingsWindow.pov_role_character"), page)
         layout.addWidget(role_label)
-        self._pov_role_character = ComboBox(page)
+        self._pov_role_character = OpaqueDropDownComboBox(page)
         self._pov_role_character.setFixedHeight(36)
         for char_key in self._model_manager.characters:
             self._pov_role_character.addItem(
@@ -2381,7 +2908,7 @@ class SettingsWindow(QWidget):
         quality_label = BodyLabel(_tr("SettingsWindow.quality_profile"), page)
         layout.addWidget(quality_label)
 
-        self._quality_combo = ComboBox(page)
+        self._quality_combo = OpaqueDropDownComboBox(page)
         self._quality_combo.setFixedHeight(36)
         current_index = 0
         for index, (profile, label) in enumerate(self._quality_options()):
@@ -3133,7 +3660,7 @@ class SettingsWindow(QWidget):
         layout.addLayout(theme_row)
 
         lang_label = BodyLabel(_tr("SettingsWindow.language"), panel)
-        self._lang_combo = ComboBox(panel)
+        self._lang_combo = OpaqueDropDownComboBox(panel)
         self._lang_combo.setMinimumWidth(120)
         langs = available_languages()
         current = current_language()
