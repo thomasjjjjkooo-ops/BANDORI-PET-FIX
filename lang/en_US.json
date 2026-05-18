@@ -229,7 +229,7 @@
     "SettingsWindow.memory_command_affection": "@affection value or @好感度 value: directly set affection (0-100).",
     "SettingsWindow.memory_command_trust": "@trust value or @信任 value: directly set trust (0-100).",
     "SettingsWindow.memory_command_familiarity": "@familiarity value or @熟悉度 value: directly set familiarity (0-100).",
-    "SettingsWindow.memory_command_mood": "@setmood value or @当前心情 value: directly set current mood (0-100, higher = better mood, e.g. 24=annoyed 75=calm 90=shy).",
+    "SettingsWindow.memory_command_mood": "@setmood value or @当前心情 value: directly set current mood.",
     "SettingsWindow.tts_title": "Chat TTS",
     "SettingsWindow.tts_subtitle": "Configure speech synthesis for chat replies, reference audio, and translation for non-Chinese TTS.",
     "SettingsWindow.tts_enabled": "Enable Chat TTS",
