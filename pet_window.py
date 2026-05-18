@@ -211,6 +211,7 @@ class PetWindow(QWidget):
         self._opacity = opacity
         self._vsync = True
         self._game_topmost = bool(config_manager.get("game_topmost", False)) if config_manager else False
+        self._hide_live2d_model = bool(config_manager.get("hide_live2d_model", False)) if config_manager else False
         self._live2d_quality = "balanced"
         self._live2d_scale = 100
         self._tray_icon = None
@@ -558,6 +559,14 @@ class PetWindow(QWidget):
     def set_game_topmost(self, enabled: bool):
         self._game_topmost = bool(enabled)
         self._update_game_topmost_timer()
+
+    def set_hide_live2d_model(self, enabled: bool):
+        self._hide_live2d_model = bool(enabled)
+        if self._hide_live2d_model:
+            if self.isVisible():
+                self.hide()
+        elif not self.isVisible():
+            self.show()
 
     def moveEvent(self, event: QMoveEvent):
         super().moveEvent(event)
@@ -916,6 +925,7 @@ class PetWindow(QWidget):
             "ai_event_overlay_enabled",
             "user_avatar_color",
             "language",
+            "hide_live2d_model",
         }
         if self._cfg and any(key in data for key in compact_keys):
             self._cfg.load()
@@ -931,6 +941,8 @@ class PetWindow(QWidget):
                 self._cfg.set("compact_ai_window_text_color", data["compact_ai_window_text_color"])
             if "ai_event_overlay_enabled" in data:
                 self._cfg.set("ai_event_overlay_enabled", bool(data["ai_event_overlay_enabled"]))
+            if "hide_live2d_model" in data:
+                self._cfg.set("hide_live2d_model", bool(data["hide_live2d_model"]))
             if "user_avatar_color" in data:
                 self._cfg.set("user_avatar_color", data["user_avatar_color"])
             if data.get("language"):
@@ -953,6 +965,8 @@ class PetWindow(QWidget):
             self._live2d_widget.set_vsync(data["vsync"])
         if "game_topmost" in data:
             self.set_game_topmost(data["game_topmost"])
+        if "hide_live2d_model" in data:
+            self.set_hide_live2d_model(data["hide_live2d_model"])
         if "live2d_quality" in data:
             self._live2d_quality = normalize_live2d_quality(data["live2d_quality"])
             self._live2d_widget.set_render_quality(self._live2d_quality)
@@ -1893,6 +1907,11 @@ class PetWindow(QWidget):
         if self.isVisible():
             self.hide()
         else:
+            self._hide_live2d_model = False
+            if self._cfg:
+                self._cfg.load()
+                self._cfg.set("hide_live2d_model", False)
+                self._cfg.save()
             self.show()
 
     def _open_settings(self, start_on_costumes=False):
@@ -1957,6 +1976,7 @@ class PetWindow(QWidget):
             self._cfg.set("dark_theme", isDarkTheme())
             self._cfg.set("vsync", self._vsync)
             self._cfg.set("game_topmost", self._game_topmost)
+            self._cfg.set("hide_live2d_model", self._hide_live2d_model)
             self._cfg.set("live2d_quality", self._live2d_quality)
             self._cfg.set("live2d_scale", self._live2d_scale)
             self._cfg.set("drag_locked", self._live2d_widget._drag_locked)

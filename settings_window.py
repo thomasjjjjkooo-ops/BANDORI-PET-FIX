@@ -807,6 +807,9 @@ class SettingsWindow(QWidget):
         self._selecting_model = False
         self._vsync = vsync
         self._game_topmost = bool(self._cfg.get("game_topmost", False)) if self._cfg else False
+        self._hide_live2d_model = (
+            bool(self._cfg.get("hide_live2d_model", False)) if self._cfg else False
+        )
         self._live2d_quality = normalize_live2d_quality(
             self._cfg.get("live2d_quality", "balanced") if self._cfg else "balanced"
         )
@@ -4061,6 +4064,15 @@ class SettingsWindow(QWidget):
         game_topmost_row.addWidget(self._game_topmost_switch)
         layout.addLayout(game_topmost_row)
 
+        hide_live2d_label = BodyLabel(_tr("SettingsWindow.side_hide_live2d_model"), panel)
+        self._hide_live2d_model_switch = SwitchButton(panel)
+        self._hide_live2d_model_switch.setChecked(self._hide_live2d_model)
+        hide_live2d_row = QHBoxLayout()
+        hide_live2d_row.addWidget(hide_live2d_label)
+        hide_live2d_row.addStretch()
+        hide_live2d_row.addWidget(self._hide_live2d_model_switch)
+        layout.addLayout(hide_live2d_row)
+
         opacity_label = BodyLabel(_tr("SettingsWindow.side_opacity"), panel)
         layout.addWidget(opacity_label)
         self._opacity_slider = Slider(Qt.Orientation.Horizontal, panel)
@@ -4464,6 +4476,7 @@ class SettingsWindow(QWidget):
             "dark_theme": self._theme_switch.isChecked(),
             "vsync": self._vsync_switch.isChecked(),
             "game_topmost": self._game_topmost_switch.isChecked(),
+            "hide_live2d_model": self._hide_live2d_model_switch.isChecked(),
             "live2d_quality": self._live2d_quality,
             "live2d_scale": self._live2d_scale,
             "compact_ai_window_enabled": self._cfg.get("compact_ai_window_enabled", False) if self._cfg else False,
@@ -4488,6 +4501,7 @@ class SettingsWindow(QWidget):
             self._cfg.set("dark_theme", settings["dark_theme"])
             self._cfg.set("vsync", settings["vsync"])
             self._cfg.set("game_topmost", settings["game_topmost"])
+            self._cfg.set("hide_live2d_model", settings["hide_live2d_model"])
             self._cfg.set("live2d_quality", settings["live2d_quality"])
             self._cfg.set("live2d_scale", settings["live2d_scale"])
             self._cfg.save()
