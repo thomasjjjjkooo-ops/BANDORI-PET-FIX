@@ -124,7 +124,8 @@ def main():
     app.aboutToQuit.connect(pet._save_config)
     app.aboutToQuit.connect(live2d.dispose)
 
-    pet.show()
+    if not cfg.get("hide_live2d_model", False):
+        pet.show()
     return app.exec()
 
 

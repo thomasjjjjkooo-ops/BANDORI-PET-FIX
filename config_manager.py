@@ -20,6 +20,7 @@ DEFAULTS = {
     "dark_theme": False,
     "vsync": True,
     "game_topmost": False,
+    "hide_live2d_model": False,
     "live2d_quality": "balanced",
     "live2d_scale": 0,
     "drag_locked": False,

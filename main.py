@@ -293,6 +293,10 @@ def main():
             "game_topmost",
             pet_window_ref.get("game_topmost", cfg.get("game_topmost", False)),
         )
+        pet_window_ref["hide_live2d_model"] = data.get(
+            "hide_live2d_model",
+            pet_window_ref.get("hide_live2d_model", cfg.get("hide_live2d_model", False)),
+        )
         pet_window_ref["live2d_quality"] = data.get(
             "live2d_quality",
             pet_window_ref.get("live2d_quality", cfg.get("live2d_quality", "balanced")),
@@ -344,6 +348,7 @@ def main():
         cfg.set("dark_theme", pet_window_ref["dark"])
         cfg.set("vsync", pet_window_ref["vsync"])
         cfg.set("game_topmost", pet_window_ref["game_topmost"])
+        cfg.set("hide_live2d_model", pet_window_ref["hide_live2d_model"])
         cfg.set("live2d_quality", pet_window_ref["live2d_quality"])
         cfg.set("live2d_scale", pet_window_ref["live2d_scale"])
         cfg.set("compact_ai_window_enabled", pet_window_ref["compact_ai_window_enabled"])
@@ -380,6 +385,8 @@ def main():
             cfg.set("vsync", pet_window_ref["vsync"])
         if "game_topmost" in pet_window_ref:
             cfg.set("game_topmost", pet_window_ref["game_topmost"])
+        if "hide_live2d_model" in pet_window_ref:
+            cfg.set("hide_live2d_model", pet_window_ref["hide_live2d_model"])
         if "live2d_quality" in pet_window_ref:
             cfg.set("live2d_quality", pet_window_ref["live2d_quality"])
         if "live2d_scale" in pet_window_ref:
