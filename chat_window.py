@@ -2958,7 +2958,7 @@ class ChatWindow(QWidget):
     def _remember_manual_text(self, text: str):
         content = text.strip()
         if not content:
-            self._show_local_assistant_message("要记住什么？可以输入 @记住 你的内容。")
+            self._show_local_assistant_message(_tr("ChatWindow.memory_remember_hint", "要记住什么？可以输入 @记住 你的内容。"))
             return
         user_key = self._user_memory_key()
         for character in self._memory_target_characters():
@@ -2979,18 +2979,18 @@ class ChatWindow(QWidget):
                 event_type="manual_memory",
                 reason="用户手动添加长期记忆",
             )
-        self._show_local_assistant_message("已记住：" + content)
+        self._show_local_assistant_message(_tr("ChatWindow.memory_remembered", "已记住：{content}", content=content))
 
     def _forget_memory_text(self, text: str):
         query = text.strip()
         if not query:
-            self._show_local_assistant_message("要忘记哪条记忆？可以输入 @忘记 关键词。")
+            self._show_local_assistant_message(_tr("ChatWindow.memory_forget_hint", "要忘记哪条记忆？可以输入 @忘记 关键词。"))
             return
         user_key = self._user_memory_key()
         total = 0
         for character in self._memory_target_characters():
             total += self._db.delete_character_memories_like(character, user_key, query)
-        self._show_local_assistant_message(f"已删除 {total} 条包含“{query}”的长期记忆。")
+        self._show_local_assistant_message(_tr("ChatWindow.memory_forget_result", "已删除 {count} 条包含“{query}”的长期记忆。", count=total, query=query))
 
     def _handle_local_memory_command(self, text: str) -> bool:
         stripped = text.strip()

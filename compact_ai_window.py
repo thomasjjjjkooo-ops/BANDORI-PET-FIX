@@ -659,7 +659,7 @@ class CompactAIWindow(QWidget):
                 self._input.clear()
                 content = stripped[len(prefix):].strip()
                 if not content:
-                    self._set_output_text("要记住什么？可以输入 @记住 你的内容。")
+                    self._set_output_text(_tr("ChatWindow.memory_remember_hint", "要记住什么？可以输入 @记住 你的内容。"))
                     return True
                 self._db.add_character_memory(
                     self._character,
@@ -678,21 +678,21 @@ class CompactAIWindow(QWidget):
                     event_type="manual_memory",
                     reason="用户手动添加长期记忆",
                 )
-                self._set_output_text("已记住：" + content)
+                self._set_output_text(_tr("ChatWindow.memory_remembered", "已记住：{content}", content=content))
                 return True
         for prefix in ("@forget ", "/forget ", "@忘记 ", "/忘记 "):
             if stripped.startswith(prefix):
                 self._input.clear()
                 query = stripped[len(prefix):].strip()
                 if not query:
-                    self._set_output_text("要忘记哪条记忆？可以输入 @忘记 关键词。")
+                    self._set_output_text(_tr("ChatWindow.memory_forget_hint", "要忘记哪条记忆？可以输入 @忘记 关键词。"))
                     return True
                 count = self._db.delete_character_memories_like(
                     self._character,
                     self._user_memory_key(),
                     query,
                 )
-                self._set_output_text(f"已删除 {count} 条包含“{query}”的长期记忆。")
+                self._set_output_text(_tr("ChatWindow.memory_forget_result", "已删除 {count} 条包含“{query}”的长期记忆。", count=count, query=query))
                 return True
         return False
 
