@@ -2101,11 +2101,34 @@ class ChatWindow(QWidget):
         group_key = self._conversation_key_for(characters)
         if not group_key.startswith("__group__:"):
             return
-        menu = RoundMenu(parent=self)
-        rename_action = Action(FluentIcon.EDIT, _tr("ChatWindow.rename_group"), self)
+        menu = QMenu(self)
+        menu.setObjectName("GroupChatContextMenu")
+        dark = isDarkTheme()
+        bg = "#1b1f29" if dark else "#ffffff"
+        hover = BANDORI_PRIMARY_SOFT_DARK_HOVER if dark else BANDORI_PRIMARY_SOFT
+        border = "#303849" if dark else "#d8deea"
+        text = "#f7f7fb" if dark else "#1f2328"
+        menu.setStyleSheet(f"""
+            QMenu#GroupChatContextMenu {{
+                background: {bg};
+                color: {text};
+                border: 1px solid {border};
+                border-radius: 8px;
+                padding: 6px;
+            }}
+            QMenu#GroupChatContextMenu::item {{
+                padding: 9px 28px 9px 12px;
+                border-radius: 6px;
+                min-width: 168px;
+            }}
+            QMenu#GroupChatContextMenu::item:selected {{
+                background: {hover};
+            }}
+        """)
+        rename_action = Action(FluentIcon.EDIT, _tr("ChatWindow.rename_group"), menu)
         rename_action.triggered.connect(lambda: self._rename_group_chat(characters))
         menu.addAction(rename_action)
-        menu.exec(global_pos, ani=True)
+        menu.exec(global_pos)
 
     def _rename_group_chat(self, characters: list[str]):
         group_key = self._conversation_key_for(characters)
